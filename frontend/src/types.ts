@@ -53,4 +53,10 @@ export interface StoryRow {
   read?: boolean
 }
 
-export type FeedTab = 'important' | 'fresh' | 'all' | 'editorials' | 'bookmarks'
+export type FeedTab =
+  | 'important'
+  | 'fresh'
+  | 'all'
+  | 'editorials'
+  | 'bookmarks'
+  | 'watch'

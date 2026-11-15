@@ -102,7 +102,8 @@ interface ListPage {
   total: number
 }
 
-const listKey = (tab: FeedTab, category: string) => `${tab}|${category}`
+const listKey = (tab: FeedTab, category: string, scope = '') =>
+  scope ? `${tab}:${scope}|${category}` : `${tab}|${category}`
 
 function App() {
   const [tab, setTab] = useState<FeedTab>('important')
@@ -337,6 +338,75 @@ function App() {
     }
   }, [menuOpen])
 
+  // キーワードウォッチ（2026-11-15 ユーザー決定）。キーワードは localStorage に保存する
+  const [keywords, setKeywords] = useState<string[]>(() => {
+    try {
+      const v: unknown = JSON.parse(
+        localStorage.getItem('ichigyo:keywords') || '[]',
+      )
+      return Array.isArray(v)
+        ? v.filter(
+            (k): k is string => typeof k === 'string' && k.trim().length > 0,
+          )
+        : []
+    } catch {
+      return []
+    }
+  })
+  /** ウォッチビューで選択中のキーワード（null は「すべて」= 全キーワードの OR） */
+  const [watchKeyword, setWatchKeyword] = useState<string | null>(null)
+  const [keywordInput, setKeywordInput] = useState('')
+  const keywordsRef = useRef<string[]>(keywords)
+  const watchKeywordRef = useRef<string | null>(watchKeyword)
+
+  useEffect(() => {
+    keywordsRef.current = keywords
+    try {
+      localStorage.setItem('ichigyo:keywords', JSON.stringify(keywords))
+    } catch {
+      /* 保存できなくても動作は続ける */
+    }
+  }, [keywords])
+
+  useEffect(() => {
+    watchKeywordRef.current = watchKeyword
+  }, [watchKeyword])
+
+  /** ウォッチのページキャッシュを捨てる（キーワード集合が変わると「すべて」の中身が変わるため）。 */
+  function clearWatchPages() {
+    setPages((prev) => {
+      const updated = { ...prev }
+      for (const k of Object.keys(updated)) {
+        if (k.startsWith('watch')) delete updated[k]
+      }
+      return updated
+    })
+  }
+
+  /** キーワードを登録する（カンマは区切りと衝突するので空白に置換、重複は追加しない）。追加できたら true。 */
+  function addKeyword(raw: string): boolean {
+    const kw = raw.replace(/,/g, ' ').trim().replace(/\s+/g, ' ')
+    if (!kw || keywordsRef.current.includes(kw)) return false
+    setKeywords((prev) => [...prev, kw])
+    clearWatchPages()
+    return true
+  }
+
+  function removeKeyword(kw: string) {
+    setKeywords((prev) => prev.filter((k) => k !== kw))
+    if (watchKeywordRef.current === kw) setWatchKeyword(null)
+    clearWatchPages()
+  }
+
+  function selectWatchKeyword(kw: string | null) {
+    acknowledgeNew()
+    setWatchKeyword(kw)
+    setSelectedId(null)
+    setOutletId(null)
+    setCoverageKind('summary')
+    goToListPane()
+  }
+
   /** 重要タブのカテゴリミュート切替。条件が変わるので重要タブのキャッシュは捨てる。 */
   function toggleMuteCategory(cat: string) {
     setMutedCategories((prev) =>
@@ -429,11 +499,23 @@ function App() {
     refreshBookmarkCount()
   }, [refreshBookmarkCount])
 
-  const key = listKey(tab, category)
+  const key = listKey(
+    tab,
+    category,
+    tab === 'watch' ? (watchKeyword ?? '__all__') : '',
+  )
   const page = pages[key] ?? null
 
   const loadPage = useCallback(
     async (target: FeedTab, cat: string, offset: number, append: boolean) => {
+      const scope =
+        target === 'watch' ? (watchKeywordRef.current ?? '__all__') : ''
+      const watchKeywords =
+        target === 'watch'
+          ? watchKeywordRef.current
+            ? [watchKeywordRef.current]
+            : keywordsRef.current
+          : []
       try {
         const result = await fetchTabRows(
           target,
@@ -441,6 +523,7 @@ function App() {
           offset,
           100,
           mutedRef.current,
+          watchKeywords,
         )
         setRows((prev) => {
           const next = { ...prev }
@@ -460,7 +543,7 @@ function App() {
           return next
         })
         setPages((prev) => {
-          const k = listKey(target, cat)
+          const k = listKey(target, cat, scope)
           const cur = prev[k]
           const ids = append && cur
             ? [...cur.ids, ...result.rows.map((r) => r.id)]
@@ -475,7 +558,7 @@ function App() {
         setLoadError('ニュースの取得に失敗しました。')
         setPages((prev) => ({
           ...prev,
-          [listKey(target, cat)]: prev[listKey(target, cat)] ?? { ids: [], total: 0 },
+          [listKey(target, cat, scope)]: prev[listKey(target, cat, scope)] ?? { ids: [], total: 0 },
         }))
         return null
       }
@@ -1118,6 +1201,51 @@ function App() {
                     ))}
                   </section>
                   <section className="menu-section">
+                    <h3>キーワードウォッチ</h3>
+                    <p className="menu-note">
+                      登録したキーワードを含むニュースだけを、タブ行のキーワードボタンから見られます。一致はクラスタと記事の見出し・要約が対象で、本文は含みません。
+                    </p>
+                    <form
+                      className="kw-form"
+                      onSubmit={(e) => {
+                        e.preventDefault()
+                        if (addKeyword(keywordInput)) setKeywordInput('')
+                      }}
+                    >
+                      <input
+                        className="kw-input"
+                        type="text"
+                        value={keywordInput}
+                        onChange={(e) => setKeywordInput(e.target.value)}
+                        placeholder="例: 今田美桜"
+                        aria-label="登録するキーワード"
+                        maxLength={50}
+                      />
+                      <button type="submit" className="kw-add">
+                        追加
+                      </button>
+                    </form>
+                    {keywords.length > 0 ? (
+                      <ul className="kw-list">
+                        {keywords.map((k) => (
+                          <li key={k} className="kw-item">
+                            <span>{k}</span>
+                            <button
+                              type="button"
+                              className="kw-remove"
+                              onClick={() => removeKeyword(k)}
+                              aria-label={`「${k}」をキーワードから削除`}
+                            >
+                              削除
+                            </button>
+                          </li>
+                        ))}
+                      </ul>
+                    ) : (
+                      <p className="menu-note">まだ登録されていません。</p>
+                    )}
+                  </section>
+                  <section className="menu-section">
                     <h3>データの管理</h3>
                     <div className="menu-row">
                       <span className="menu-label">データベース容量</span>
@@ -1246,6 +1374,32 @@ function App() {
             <span className="bookmark-count">{bookmarkCount}</span>
           ) : null}
         </button>
+        <button
+          type="button"
+          className={tab === 'watch' ? 'watch-nav is-active' : 'watch-nav'}
+          onClick={() => switchTab('watch')}
+          aria-current={tab === 'watch' ? 'page' : undefined}
+          aria-label="キーワードウォッチを表示"
+          title="キーワードウォッチ"
+        >
+          <svg
+            width="17"
+            height="17"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            aria-hidden="true"
+          >
+            <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+            <circle cx="12" cy="12" r="3" />
+          </svg>
+          {keywords.length > 0 ? (
+            <span className="bookmark-count">{keywords.length}</span>
+          ) : null}
+        </button>
       </nav>
 
       <div className="cat-bar" role="tablist" aria-label="カテゴリ">
@@ -1276,6 +1430,36 @@ function App() {
         )}
       </div>
 
+      {tab === 'watch' ? (
+        <div className="watch-bar" role="tablist" aria-label="キーワード">
+          <button
+            type="button"
+            role="tab"
+            aria-selected={watchKeyword === null}
+            className={
+              watchKeyword === null ? 'cat-chip is-active' : 'cat-chip'
+            }
+            onClick={() => selectWatchKeyword(null)}
+          >
+            すべて
+          </button>
+          {keywords.map((k) => (
+            <button
+              key={k}
+              type="button"
+              role="tab"
+              aria-selected={watchKeyword === k}
+              className={
+                watchKeyword === k ? 'cat-chip is-active' : 'cat-chip'
+              }
+              onClick={() => selectWatchKeyword(k)}
+            >
+              {k}
+            </button>
+          ))}
+        </div>
+      ) : null}
+
       <div
         className="workspace"
         ref={workspaceRef}
@@ -1291,7 +1475,12 @@ function App() {
             <p className="empty">読み込み中…</p>
           ) : visible.length === 0 ? (
             <p className="empty">
-              {loadError ?? 'この条件に表示するニュースはありません。'}
+              {loadError ??
+                (tab === 'watch' && keywords.length === 0
+                  ? 'キーワードが登録されていません。設定メニュー（右上のハンバーガー）からキーワードを登録してください。'
+                  : tab === 'watch' && watchKeyword
+                    ? `「${watchKeyword}」に一致するニュースはまだありません。`
+                    : 'この条件に表示するニュースはありません。')}
             </p>
           ) : (
             <>

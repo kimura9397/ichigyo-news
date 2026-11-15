@@ -58,8 +58,9 @@
   color: inherit;
 }
 
-/* ブックマークはタブではなく、タブ行の右端に置く見た目の違うアイコンボタン */
-.bookmark-nav {
+/* ブックマークとキーワードウォッチはタブではなく、タブ行の右端に置く見た目の違うアイコンボタン */
+.bookmark-nav,
+.watch-nav {
   appearance: none;
   flex: 0 0 auto;
   align-self: center;
@@ -75,12 +76,14 @@
   cursor: pointer;
 }
 
-.bookmark-nav:hover {
+.bookmark-nav:hover,
+.watch-nav:hover {
   color: var(--ink);
   border-color: var(--muted);
 }
 
-.bookmark-nav.is-active {
+.bookmark-nav.is-active,
+.watch-nav.is-active {
   color: var(--vermillion);
   border-color: var(--vermillion);
   background: color-mix(in srgb, var(--vermillion) 10%, var(--tint-base));
@@ -733,7 +736,8 @@
     display: none;
   }
 
-  .bookmark-nav {
+  .bookmark-nav,
+  .watch-nav {
     margin: 0 6px;
     padding: 6px 9px;
   }
@@ -951,4 +955,81 @@
 .menu-action-btn:disabled {
   opacity: 0.5;
   cursor: wait;
+}
+
+/* --- キーワードウォッチ（チップバーと設定メニュー内の管理UI） --- */
+
+.watch-bar {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--line);
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.kw-form {
+  display: flex;
+  gap: 6px;
+  margin: 4px 0 8px;
+}
+
+.kw-input {
+  flex: 1;
+  min-width: 0;
+  padding: 7px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--paper);
+  color: var(--ink);
+  font: inherit;
+  font-size: 13px;
+}
+
+.kw-add {
+  appearance: none;
+  padding: 7px 14px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--ink);
+  color: var(--paper);
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 650;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.kw-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.kw-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 5px 0;
+  font-size: 13px;
+}
+
+.kw-remove {
+  appearance: none;
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--muted);
+  border-radius: 999px;
+  padding: 3px 10px;
+  font: inherit;
+  font-size: 11.5px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.kw-remove:hover {
+  color: var(--vermillion);
+  border-color: var(--vermillion);
 }

@@ -80,7 +80,12 @@ function hasData() {
 
 /* ---------- 一覧（バージョン行） ---------- */
 
-function tabWhere(tab, category, muted = []) {
+/** LIKE の部分一致パターン（%, _, \ はエスケープして文字どおりに扱う）。 */
+function likePattern(keyword) {
+  return `%${keyword.replace(/[\\%_]/g, (ch) => `\\${ch}`)}%`;
+}
+
+function tabWhere(tab, category, muted = [], keywords = []) {
   const conds = [];
   const params = [];
   if (tab === 'important') {
@@ -104,6 +109,25 @@ function tabWhere(tab, category, muted = []) {
     // 社説タブ: 社説が1件以上確認できた（found=1）クラスタだけを、各クラスタ最新版の行で出す
     conds.push('EXISTS (SELECT 1 FROM editorials e WHERE e.cluster_id = c.id AND e.found = 1)');
     conds.push('v.version_no = (SELECT MAX(v2.version_no) FROM versions v2 WHERE v2.cluster_id = c.id)');
+  }
+  if (tab === 'watch') {
+    // キーワードウォッチ/検索: 各クラスタ最新版の行だけを出す。
+    // 一致は「クラスタのタイトル、またはそのクラスタの記事（全版）のタイトル/要約への部分一致」。
+    // 本文は対象外。複数キーワードは OR。キーワードが無ければ一致なし（1 = 0）。
+    // 重要度スコアには混ぜない（中立のランキング維持）。
+    conds.push('v.version_no = (SELECT MAX(v2.version_no) FROM versions v2 WHERE v2.cluster_id = c.id)');
+    if (keywords.length > 0) {
+      const perKeyword = keywords
+        .map(() => `(c.title LIKE ? ESCAPE '\\' OR EXISTS (SELECT 1 FROM articles ak WHERE ak.cluster_id = c.id AND (ak.title LIKE ? ESCAPE '\\' OR ak.summary LIKE ? ESCAPE '\\')))`)
+        .join(' OR ');
+      conds.push(`(${perKeyword})`);
+      for (const kw of keywords) {
+        const pattern = likePattern(kw);
+        params.push(pattern, pattern, pattern);
+      }
+    } else {
+      conds.push('1 = 0');
+    }
   }
   if (tab === 'new') { conds.push('v.created_at >= ?'); params.push(new Date(Date.now() - 24 * 3600000).toISOString()); }
   if (category && category !== 'すべて') {
@@ -145,14 +169,14 @@ const ROWS_SELECT = `
     JOIN clusters c ON c.id = v.cluster_id
     JOIN articles a ON a.version_id = v.id`;
 
-function versionRows(tab, category, limit, offset, muted = []) {
-  const { where, params } = tabWhere(tab, category, muted);
+function versionRows(tab, category, limit, offset, muted = [], keywords = []) {
+  const { where, params } = tabWhere(tab, category, muted, keywords);
   return db.prepare(`${ROWS_SELECT} ${where} GROUP BY v.id ORDER BY ${tabOrder(tab)} LIMIT ? OFFSET ?`)
     .all(...params, limit, offset);
 }
 
-function versionTotal(tab, category, muted = []) {
-  const { where, params } = tabWhere(tab, category, muted);
+function versionTotal(tab, category, muted = [], keywords = []) {
+  const { where, params } = tabWhere(tab, category, muted, keywords);
   const row = db.prepare(`SELECT COUNT(*) AS total FROM (
     SELECT v.id FROM versions v JOIN clusters c ON c.id = v.cluster_id JOIN articles a ON a.version_id = v.id
     ${where} GROUP BY v.id)`).get(...params);
@@ -160,8 +184,8 @@ function versionTotal(tab, category, muted = []) {
 }
 
 /** タブ条件（カテゴリ絞りなし）でのカテゴリ別件数。空カテゴリは「その他」。 */
-function categoryCounts(tab, muted = []) {
-  const { where, params } = tabWhere(tab, null, muted);
+function categoryCounts(tab, muted = [], keywords = []) {
+  const { where, params } = tabWhere(tab, null, muted, keywords);
   const rows = db.prepare(`
     SELECT CASE WHEN c.category = '' THEN 'その他' ELSE c.category END AS category, COUNT(DISTINCT v.id) AS count
     FROM versions v JOIN clusters c ON c.id = v.cluster_id JOIN articles a ON a.version_id = v.id
@@ -179,7 +203,7 @@ async function apiStories(url) {
     kicked = kickRefreshIfStale();
   }
   const tabParam = url.searchParams.get('tab') || 'all';
-  const tab = ['important', 'new', 'all', 'bookmarks', 'editorials'].includes(tabParam) ? tabParam : 'all';
+  const tab = ['important', 'new', 'all', 'bookmarks', 'editorials', 'watch'].includes(tabParam) ? tabParam : 'all';
   const catParam = url.searchParams.get('category') || 'すべて';
   const category = ['すべて', ...CATEGORIES].includes(catParam) ? catParam : 'すべて';
   const limit = Math.min(500, Math.max(1, Number.parseInt(url.searchParams.get('limit') || '100', 10) || 100));
@@ -191,14 +215,21 @@ async function apiStories(url) {
     .map((s) => s.trim())
     .filter((s) => CATEGORIES.includes(s))
     .map((s) => (s === 'その他' ? '' : s));
+  // キーワードウォッチ/検索のキーワード（カンマ区切り、OR 結合）。tab=watch でのみ tabWhere が使う。
+  const keywords = [...new Set(
+    (url.searchParams.get('keywords') || '')
+      .split(',')
+      .map((s) => s.trim().slice(0, 100))
+      .filter(Boolean),
+  )].slice(0, 20);
   return {
-    stories: versionRows(tab, category, limit, offset, muted),
-    total: versionTotal(tab, category, muted),
+    stories: versionRows(tab, category, limit, offset, muted, keywords),
+    total: versionTotal(tab, category, muted, keywords),
     limit,
     offset,
     refreshing: kicked || refreshing !== null,
     lastRun: lastFinishedRun(),
-    categories: categoryCounts(tab, muted),
+    categories: categoryCounts(tab, muted, keywords),
   };
 }
 

@@ -473,13 +473,15 @@ async function fetchJson<T>(url: string, init?: RequestInit): Promise<T> {
 }
 
 /** タブ＋カテゴリ別の一覧を1ページ分取得する。UIの 'fresh' は API の 'new' に対応。
- *  mutedCategories は重要タブでのみサーバーへ渡す（他タブではサーバー側でも無視される）。 */
+ *  mutedCategories は重要タブでのみサーバーへ渡す（他タブではサーバー側でも無視される）。
+ *  watchKeywords は tab=watch のときだけ渡す（サーバー側で OR の部分一致になる）。 */
 export async function fetchTabRows(
   tab: FeedTab,
   category: string,
   offset = 0,
   limit = 100,
   mutedCategories: string[] = [],
+  watchKeywords: string[] = [],
 ): Promise<StoriesPage> {
   const apiTab = tab === 'fresh' ? 'new' : tab
   const params = new URLSearchParams({
@@ -490,6 +492,9 @@ export async function fetchTabRows(
   if (category && category !== 'すべて') params.set('category', category)
   if (apiTab === 'important' && mutedCategories.length > 0) {
     params.set('mute', mutedCategories.join(','))
+  }
+  if (apiTab === 'watch' && watchKeywords.length > 0) {
+    params.set('keywords', watchKeywords.join(','))
   }
   const data = await fetchJson<{
     stories: RawStoryRow[]
