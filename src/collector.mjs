@@ -316,20 +316,52 @@ if (AGGREGATORS.includes(source)) return 0; // アグリゲータは媒体数に
 return MAJOR_SOURCES.includes(source) ? 3 : 1;
 }
 
+/** 配信記事の署名: クラスタリングと同じ正規化をかけたタイトル。タイトルが空なら要約冒頭で代用する。 */
+export function articleSignature(article) {
+const base = String(article.title || '').trim() || String(article.summary || '').slice(0, 60);
+return normalizeForMatch(base);
+}
+
+/**
+* 重要度スコア（2026-11-15 改善: B 配信の重複割引 + D 社説ボーナス + A カテゴリ減衰）。
+* 旧式は「媒体の重み合計 + 記事総数」が主成分で、通信社配信の複製や
+* 全社一斉に報じる予定型イベント（スポーツ大会等）を過大評価していた。
+* - B: 記事を正規化タイトルの署名でグループ化する。記事数成分はグループ数にし、
+*      媒体の重みはグループごとに最大の重みを1回だけ数える（配信の複製は1回分、
+*      独自報道は社ごとに数える）。
+* - A: カテゴリがスポーツ / 文化・エンタメのクラスタは、社説ボーナスを除いた
+*      小計に ×0.7 の減衰を掛ける。
+* - D: 社説が found で確認できた媒体1つにつき +6（上限 +18）。各紙が社説で
+*      取り上げたニュースは「重要」と判断された証拠とみなす。
+*/
 export function importanceFor(db, clusterId) {
+const cluster = db.prepare('SELECT category FROM clusters WHERE id = ?').get(clusterId);
 const row = db.prepare(`
-SELECT COUNT(*) AS articles,
-(SELECT COUNT(*) FROM versions WHERE cluster_id =?) AS versions,
+SELECT (SELECT COUNT(*) FROM versions WHERE cluster_id = ?) AS versions,
 MAX(published_at) AS latest
-FROM articles WHERE cluster_id =?`).get(clusterId, clusterId);
-// 媒体の質の重み: 主要媒体=3、その他=1、アグリゲータ=0 の合計
-const sourceScore = db.prepare('SELECT DISTINCT source FROM articles WHERE cluster_id = ?').all(clusterId)
-.reduce((sum, r) => sum + sourceWeight(r.source), 0);
-let score = sourceScore + row.articles + row.versions * 2;
+FROM articles WHERE cluster_id = ?`).get(clusterId, clusterId);
+const articles = db.prepare('SELECT source, title, summary FROM articles WHERE cluster_id = ?').all(clusterId);
+// B: 署名グループごとに最大の媒体重みを保持する
+const groupMaxWeight = new Map();
+for (const a of articles) {
+const sig = articleSignature(a);
+const w = sourceWeight(a.source);
+if (!groupMaxWeight.has(sig) || groupMaxWeight.get(sig) < w) groupMaxWeight.set(sig, w);
+}
+let sourceScore = 0;
+for (const w of groupMaxWeight.values()) sourceScore += w;
+let score = sourceScore + groupMaxWeight.size + row.versions * 2;
 if (row.latest) {
 const ageH = (Date.now() - new Date(row.latest).getTime()) / 3600000;
 if (ageH <= 6) score += 5; else if (ageH <= 24) score += 2;
 }
+// A: カテゴリ減衰（弱め）。社説ボーナスは減衰の対象外なので、この後に加える
+if (cluster && (cluster.category === 'スポーツ' || cluster.category === '文化・エンタメ')) {
+score *= 0.7;
+}
+// D: 社説ボーナス
+const editorialCount = db.prepare('SELECT COUNT(*) AS c FROM editorials WHERE cluster_id = ? AND found = 1').get(clusterId).c;
+score += Math.min(editorialCount * 6, 18);
 return score;
 }
 
@@ -519,7 +551,11 @@ export async function fetchEditorials(db, clusterId, { fetchImpl = fetch } = {})
 const cluster = db.prepare('SELECT * FROM clusters WHERE id = ?').get(clusterId);
 if (!cluster) return null;
 const cached = db.prepare('SELECT * FROM editorials WHERE cluster_id = ?').all(clusterId);
-if (cached.length >= PAPERS.length) return cached;
+if (cached.length >= PAPERS.length) {
+// 社説ボーナス（D）が重要度に反映されるよう、キャッシュ済みでも再計算だけは行う
+db.prepare('UPDATE clusters SET importance_score = ? WHERE id = ?').run(importanceFor(db, clusterId), clusterId);
+return cached;
+}
 const terms = topicTerms(cluster.title);
 const clusterTitles = db.prepare('SELECT title FROM articles WHERE cluster_id = ? LIMIT 80').all(clusterId).map((r) => r.title);
 const nowIso = new Date().toISOString();
@@ -557,6 +593,8 @@ db.prepare('INSERT INTO editorials (cluster_id, paper, found, title, summary, ur
 .run(clusterId, row.paper, row.found, row.title, row.summary, row.url, nowIso);
 results.push(row);
 }
+// 社説ボーナス（D）が重要度に反映されるよう、取得後に再計算する
+db.prepare('UPDATE clusters SET importance_score = ? WHERE id = ?').run(importanceFor(db, clusterId), clusterId);
 return results;
 }
 
