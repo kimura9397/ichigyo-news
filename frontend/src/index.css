@@ -6,6 +6,10 @@
   --vermillion: #b13224;
   --fresh: #1f6f64;
   --shadow: 0 10px 30px color-mix(in srgb, var(--ink) 8%, transparent);
+  /* 見出し系の基準サイズ（2026-11-15 是正）。全体フォントサイズ設定が入る際はここを起点にスケールする */
+  --fs-row-title: 13px;
+  --fs-detail-title: 24px;
+  --fs-paper-title: 19px;
   --serif: 'Iowan Old Style', 'Hiragino Mincho ProN', 'Yu Mincho', serif;
   --sans: 'Hiragino Sans', 'Yu Gothic UI', system-ui, sans-serif;
   --mono: ui-monospace, 'Cascadia Mono', monospace;
