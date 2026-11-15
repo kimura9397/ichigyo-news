@@ -575,12 +575,14 @@ db.prepare('UPDATE clusters SET importance_score = ? WHERE id = ?').run(importan
 return cached;
 }
 const terms = topicTerms(cluster.title);
-const clusterTitles = db.prepare('SELECT title FROM articles WHERE cluster_id = ? LIMIT 80').all(clusterId).map((r) => r.title);
+const clusterTitles = db.prepare('SELECT title FROM articles WHERE cluster_id = ? LIMIT 10').all(clusterId).map((r) => r.title);
 const nowIso = new Date().toISOString();
 const results = [];
 for (const paper of PAPERS) {
 let found = null;
-const queries = [terms.length ? `${paper}新聞 社説 ${terms.join(' ')}` : null, `${paper}新聞 社説`].filter(Boolean);
+// topicTerms が取れない場合は検索自体をスキップする。素の「○○新聞 社説」検索は
+// その紙の最新社説を無関係に拾ってしまうため廃止した（2026-11-15 誤マッチ対策）。
+const queries = terms.length ? [`${paper}新聞 社説 ${terms.join(' ')}`] : [];
 for (const query of queries) {
 if (found) break;
 const url = `https://news.google.com/rss/search?q=${encodeURIComponent(query)}&hl=ja&gl=JP&ceid=JP:ja`;
@@ -594,8 +596,8 @@ const items = parseRss(await res.text(), {});
 for (const it of items) {
 if (normalizeSource(it.source) !== paper && !it.title.includes(paper)) continue;
 if (!it.title.includes('社説')) continue;
-// 関連判定（厳格化）: 汎用語を除いた特徴語をクラスタ見出し群と2つ以上共有しない社説は採用しない
-if (!editorialRelated(it.title, clusterTitles)) continue;
+// 関連判定（厳格化）: クラスタタイトル＋代表見出しと強い語・話題語を十分に共有しない社説は採用しない
+if (!editorialRelated(it.title, cluster.title, clusterTitles)) continue;
 found = it;
 break;
 }
@@ -700,30 +702,70 @@ export async function checkTopEditorials(db, { fetchImpl = fetch, now = new Date
 const GENERIC_TERMS = new Set(['政府', '首相', '日本', '対応', '方針', '検討', '表明', '開催', '実施', '発表', '問題', '議論', '国会', '与党', '野党', '社会', '経済', '政治', '東京', '全国', '今年', '来年', '年度', '支援', '制度', '改革', '安全', '確保', '強化', '必要', '重要', '課題', '影響', '懸念', '期待', '大臣', '知事', '市長', '会長', '社長', '関係', '当局', '現場', '会見', '記者', '説明', '批判', '主張', '明らか', '求める', '求めた', '示した', '述べた', '社説']);
 
 /**
-* テキストから「特徴語」を抽出する: カタカナ語（3字以上）、英字語（3字以上）、
-* 漢字の2字窓（汎用語を除く）。社説候補とクラスタ見出しの関連判定に使う。
+* 「強い語」: カタカナ3字以上・英字3字以上・漢字3字以上の語。
+* カタカナと漢字は3字のスライディングウィンドウで切り出す（例: 政治資金規正法 → 政治資・治資金・…）。
+* 固有名詞や専門用語はこの長さになりやすく、話題の同一性を示す根拠になる。
+* 社説候補とクラスタ見出しの関連判定に使う。
 */
-export function featureTerms(text) {
+export function strongTerms(text) {
 const terms = new Set();
 const t = String(text || '');
-for (const m of t.matchAll(/[ァ-ヶー]{3,}/g)) terms.add(m[0]);
-for (const m of t.matchAll(/[A-Za-z][A-Za-z0-9]{2,}/g)) terms.add(m[0]);
-for (const m of t.matchAll(/[\u4e00-\u9fff]{2,}/g)) {
+for (const m of t.matchAll(/[ァ-ヶー]{3,}/g)) {
 const s = m[0];
-for (let i = 0; i + 2 <= s.length; i++) terms.add(s.slice(i, i + 2));
-if (s.length >= 3) terms.add(s.slice(0, 3));
+for (let i = 0; i + 3 <= s.length; i++) terms.add(s.slice(i, i + 3));
+}
+for (const m of t.matchAll(/[A-Za-z][A-Za-z0-9]{2,}/g)) terms.add(m[0]);
+for (const m of t.matchAll(/[\u4e00-\u9fff]{3,}/g)) {
+const s = m[0];
+for (let i = 0; i + 3 <= s.length; i++) terms.add(s.slice(i, i + 3));
 }
 for (const g of GENERIC_TERMS) terms.delete(g);
 return terms;
 }
 
-/** 社説候補の見出しがクラスタの見出し群と特徴語を2つ以上共有すれば「関連あり」とする。 */
-export function editorialRelated(candidateTitle, clusterTitles) {
-const cand = featureTerms(candidateTitle);
-if (!cand.size) return false;
-const clusterTerms = new Set();
-for (const t of clusterTitles) for (const w of featureTerms(t)) clusterTerms.add(w);
-return sharedCount(cand, clusterTerms) >= 2;
+/**
+* 「弱い語」: 漢字2字の複合語（2字窓）。「日銀」「利上げ」のように話題を示す語も多いが、
+* 地名や「国際」等のありふれた語も混ざるため、単独では関連の根拠にしない。
+*/
+export function weakTerms(text) {
+const terms = new Set();
+const t = String(text || '');
+for (const m of t.matchAll(/[\u4e00-\u9fff]{2,}/g)) {
+const s = m[0];
+for (let i = 0; i + 2 <= s.length; i++) terms.add(s.slice(i, i + 2));
+}
+for (const g of GENERIC_TERMS) terms.delete(g);
+return terms;
+}
+
+/**
+* 社説候補とクラスタの関連判定（2026-11-15 厳格化）。
+* 旧判定（記事見出し最大80件の和集合と「特徴語を2つ以上共有」）は、2字窓の偶然の一致と
+* 大きな和集合の組み合わせで無関係な社説を通してしまった（実例: 車いすマラソンの
+* ニュースに、「ソウル」を共有するだけの原爆投下に関する社説が紐づいた）。
+* 新判定ではクラスタ側の語彙をクラスタタイトル＋代表的な記事見出し（先頭10件）に絞り、
+* 次のいずれかを満たす場合のみ「関連あり」とする:
+* - 強い語をクラスタ語彙と2つ以上共有し、かつクラスタタイトルとも強い語を1つ以上共有する
+* - クラスタタイトルと語（強い・弱いの合算）を2つ以上共有し、かつクラスタ語彙全体と3つ以上共有する
+*   （「日銀」「利上げ」のような2字の話題語しか共有語が無い正例を落とさないため）
+*/
+export function editorialRelated(candidateTitle, clusterTitle, headlines = []) {
+const candStrong = strongTerms(candidateTitle);
+const candAll = new Set([...candStrong, ...weakTerms(candidateTitle)]);
+if (!candAll.size) return false;
+const titleStrong = strongTerms(clusterTitle);
+const titleAll = new Set([...titleStrong, ...weakTerms(clusterTitle)]);
+const vocabStrong = new Set(titleStrong);
+const vocabAll = new Set(titleAll);
+for (const h of headlines) {
+for (const w of strongTerms(h)) { vocabStrong.add(w); vocabAll.add(w); }
+for (const w of weakTerms(h)) vocabAll.add(w);
+}
+const strongShared = sharedCount(candStrong, vocabStrong);
+const strongTitleShared = sharedCount(candStrong, titleStrong);
+const titleShared = sharedCount(candAll, titleAll);
+const vocabShared = sharedCount(candAll, vocabAll);
+return (strongShared >= 2 && strongTitleShared >= 1) || (titleShared >= 2 && vocabShared >= 3);
 }
 
 /** 見出しから社説検索用の短いトピック語（2〜6字）を抽出する。 */

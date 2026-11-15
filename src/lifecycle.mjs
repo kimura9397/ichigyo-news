@@ -6,7 +6,9 @@
 //   （手動実行は /api/maintenance から）。
 // - 保存済み本文には行単位のノイズ除去フィルタを後がけする（本文ノイズ除去、2026-11-15）。
 // - 本文が保存済みで未抽出の記事には、本文中の署名表記から記者名を後がけ抽出する（記者バイライン、2026-11-15）。
+// - 保存済みの社説（found=1）は現在の関連判定で再評価し、通らないものは found=0 に降格する（社説の誤マッチ対策、2026-11-15）。
 import { filterBodyLines, extractAuthorFromText } from './body.mjs';
+import { editorialRelated, importanceFor } from './collector.mjs';
 
 export const RETENTION_DAYS = 7;
 export const FETCH_RUNS_KEPT = 30;
@@ -156,9 +158,47 @@ export function backfillAuthors(db) {
   return filled;
 }
 
+/* ---------- 保存済み社説の再評価 ---------- */
+
 /**
- * refresh 時に行うライフサイクル一式: 閲覧集計 → prune → fetch_runs 整理 → 本文の後がけ → 署名の後がけ → 自動 VACUUM 判定。
- * 戻り値: { prunedClusters, foldedReads, refilteredBodies, backfilledAuthors, vacuumed }
+ * 保存済みの社説（found=1）を現在の関連判定（collector の editorialRelated）で再チェックし、
+ * 通らないものを found=0 に降格する。関連判定を厳格化した際に、旧判定で採用された
+ * 誤マッチを取り除くための後がけ処理（本文ノイズ除去の後がけと同じ位置づけ）。
+ * 降格時は title/summary/url を空に戻して found=0 の通常表現に揃え、
+ * 降格のあったクラスタは重要度（社説ボーナス）を再計算する。
+ * checked_at は更新しない（再評価は再検索ではないため。背景チェックの再検索間隔に影響させない）。
+ * 降格した行数を返す。
+ */
+export function reevaluateEditorials(db) {
+  const rows = db.prepare('SELECT id, cluster_id, title FROM editorials WHERE found = 1').all();
+  if (!rows.length) return 0;
+  const clusterStmt = db.prepare('SELECT title FROM clusters WHERE id = ?');
+  const titlesStmt = db.prepare('SELECT title FROM articles WHERE cluster_id = ? LIMIT 10');
+  const demote = db.prepare("UPDATE editorials SET found = 0, title = '', summary = '', url = '' WHERE id = ?");
+  const updateScore = db.prepare('UPDATE clusters SET importance_score = ? WHERE id = ?');
+  let demoted = 0;
+  const affected = new Set();
+  db.exec('BEGIN IMMEDIATE');
+  try {
+    for (const r of rows) {
+      const cluster = clusterStmt.get(r.cluster_id);
+      if (!cluster) continue;
+      const headlines = titlesStmt.all(r.cluster_id).map((x) => x.title);
+      if (!editorialRelated(r.title, cluster.title, headlines)) {
+        demote.run(r.id);
+        demoted++;
+        affected.add(r.cluster_id);
+      }
+    }
+    for (const cid of affected) updateScore.run(importanceFor(db, cid), cid);
+    db.exec('COMMIT');
+  } catch (e) { try { db.exec('ROLLBACK'); } catch {} throw e; }
+  return demoted;
+}
+
+/**
+ * refresh 時に行うライフサイクル一式: 閲覧集計 → prune → fetch_runs 整理 → 本文の後がけ → 署名の後がけ → 社説の再評価 → 自動 VACUUM 判定。
+ * 戻り値: { prunedClusters, foldedReads, refilteredBodies, backfilledAuthors, reevaluatedEditorials, vacuumed }
  */
 export function runLifecycle(db, now = new Date()) {
   const foldedReads = foldOldReadEvents(db, now);
@@ -166,6 +206,7 @@ export function runLifecycle(db, now = new Date()) {
   pruneFetchRuns(db);
   const refilteredBodies = refilterBodies(db);
   const backfilledAuthors = backfillAuthors(db);
+  const reevaluatedEditorials = reevaluateEditorials(db);
   const vacuumed = vacuumIfNeeded(db);
-  return { prunedClusters, foldedReads, refilteredBodies, backfilledAuthors, vacuumed };
+  return { prunedClusters, foldedReads, refilteredBodies, backfilledAuthors, reevaluatedEditorials, vacuumed };
 }
