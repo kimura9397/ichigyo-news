@@ -1092,3 +1092,40 @@
   color: var(--muted);
   cursor: default;
 }
+
+/* --- 社説の帰属明示（媒体バッジ・所有見出し・無い場合の案内） --- */
+
+.editorial-badge {
+  margin-left: 6px;
+  padding: 0 5px;
+  border: 1px solid var(--vermillion);
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--vermillion);
+  vertical-align: 1px;
+}
+
+.outlet.is-active .editorial-badge {
+  border-color: var(--paper);
+  color: var(--paper);
+}
+
+/* 社説ビューで「どの媒体の社説か」を本文冒頭に明示する見出し */
+.paper-owner {
+  margin: 0 0 12px;
+  padding-inline-start: 10px;
+  border-inline-start: 3px solid var(--vermillion);
+  font-family: var(--serif);
+  font-size: calc(15px * var(--font-scale));
+  font-weight: 700;
+  color: var(--ink);
+}
+
+/* 選択中の媒体に社説が無い場合の案内（別媒体の社説を無言で代替表示しない） */
+.paper-notice {
+  margin: 0;
+  font-size: calc(13.5px * var(--font-scale));
+  line-height: 1.8;
+  color: var(--ink);
+}

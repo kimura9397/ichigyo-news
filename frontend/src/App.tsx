@@ -873,14 +873,17 @@ function App() {
     (coverageKind === 'editorial' && !showEditorialTab)
       ? 'summary'
       : coverageKind
-  // 報道ビューでは本文が取れた媒体だけ、社説ビューでは社説がある媒体だけを出す
+  // 報道ビューでは本文が取れた媒体だけを出す。
+  // 社説ビューでは媒体を絞り込まない: 選択中の媒体に社説が無い場合は、別媒体の社説を
+  // 無言で代替表示せず「その媒体の社説は無い」と明示する（帰属の誤解防止、2026-11-15 是正）。
   const visibleCoverages = !selected
     ? []
     : effectiveKind === 'report'
       ? selected.coverages.filter((c) => c.body)
-      : effectiveKind === 'editorial'
-        ? selected.coverages.filter((c) => c.editorial)
-        : selected.coverages
+      : selected.coverages
+  /** 社説が確認できている媒体（社説ビューでの案内文に使う） */
+  const editorialOutlets =
+    selected?.coverages.filter((c) => c.editorial) ?? []
   const activeOutlet =
     visibleCoverages.find((coverage) => coverage.outletId === outletId) ??
     visibleCoverages[0]
@@ -1767,6 +1770,9 @@ function App() {
                       {coverage.body ? (
                         <span className="body-badge">本文あり</span>
                       ) : null}
+                      {coverage.editorial ? (
+                        <span className="editorial-badge">社説あり</span>
+                      ) : null}
                     </button>
                   ))}
                 </div>
@@ -1782,8 +1788,9 @@ function App() {
                         effectiveKind === kind ? 'kind is-active' : 'kind'
                       }
                       onClick={() => {
+                        // 媒体の選択は種別を切り替えても維持する（社説ビューで
+                        // 「選択中の媒体に社説があるか」を正しく判定するため）
                         setCoverageKind(kind)
-                        setOutletId(null)
                       }}
                     >
                       {label}
@@ -1801,22 +1808,38 @@ function App() {
                     </p>
                     <h3>{activeOutlet.headline}</h3>
                     {effectiveKind === 'editorial' ? (
-                      <>
-                        <Paragraphs text={activeOutlet.editorial ?? ''} />
-                        {activeOutlet.editorialUrl ? (
-                          <a
-                            className="paper-link"
-                            href={activeOutlet.editorialUrl}
-                            target="_blank"
-                            rel="noreferrer"
-                          >
-                            社説の元記事を読む
-                          </a>
-                        ) : null}
-                        <p className="paper-note">
-                          社説は版ごとではなく、この出来事全体に対するものです。
+                      editorialLoading ? (
+                        <p className="paper-note">社説を確認中…</p>
+                      ) : activeOutlet.editorial ? (
+                        <>
+                          <p className="paper-owner">
+                            {activeOutlet.outletName}の社説
+                          </p>
+                          <Paragraphs text={activeOutlet.editorial ?? ''} />
+                          {activeOutlet.editorialUrl ? (
+                            <a
+                              className="paper-link"
+                              href={activeOutlet.editorialUrl}
+                              target="_blank"
+                              rel="noreferrer"
+                            >
+                              社説の元記事を読む
+                            </a>
+                          ) : null}
+                          <p className="paper-note">
+                            社説は版ごとではなく、この出来事全体に対するものです。
+                          </p>
+                        </>
+                      ) : (
+                        <p className="paper-notice">
+                          {activeOutlet.outletName}の社説はありません。
+                          {editorialOutlets.length > 0
+                            ? `社説があるのは ${editorialOutlets
+                                .map((c) => c.outletName)
+                                .join('・')} です。上の媒体ボタン（「社説あり」の印が付いたもの）から選んでください。`
+                            : ''}
                         </p>
-                      </>
+                      )
                     ) : effectiveKind === 'report' ? (
                       <>
                         <Paragraphs text={activeOutlet.body ?? ''} />
