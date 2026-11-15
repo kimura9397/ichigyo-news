@@ -28,7 +28,6 @@ import './App.css'
 const TABS: { id: FeedTab; label: string; hint: string }[] = [
   { id: 'important', label: '重要', hint: '社会的影響が大きい出来事' },
   { id: 'fresh', label: '新着', hint: '直近で入った初報と続報' },
-  { id: 'all', label: 'すべて', hint: '版を含む全行' },
   { id: 'editorials', label: '社説', hint: '社説が確認できたニュース' },
 ]
 
