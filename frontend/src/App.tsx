@@ -42,7 +42,7 @@ function formatBytes(bytes: number) {
   return mb >= 1 ? `${mb.toFixed(1)} MB` : `${Math.max(1, Math.round(bytes / 1024))} KB`
 }
 
-const BASE_TITLE = '一行ニュース — 同じニュースは、一行。'
+const BASE_TITLE = '一行ニュース — 一行で、五紙を読む。'
 const POLL_INTERVALS = [2, 5, 10]
 
 // 一覧ペインの幅比率（PCレイアウト、2026-11-15 ユーザー決定でドラッグ調整可能に）
@@ -1132,7 +1132,7 @@ function App() {
     <div className="shell">
       <header className="masthead">
         <div className="brand">
-          <p className="brand-kicker">同じニュースは、一行。</p>
+          <p className="brand-kicker">一行で、五紙を読む。</p>
           <h1>一行ニュース</h1>
         </div>
         <div className="masthead-side">

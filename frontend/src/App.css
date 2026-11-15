@@ -19,6 +19,8 @@
   font-size: 11px;
   letter-spacing: 0.18em;
   color: var(--muted);
+  /* 副題は1行に収める（2026-11-15 決定）。狭幅でも折り返さない */
+  white-space: nowrap;
 }
 
 .brand h1 {
@@ -800,6 +802,19 @@
 
 /* 狭い画面ではタブの補足（hint）を落として、タブ行を1行に収める */
 @media (max-width: 560px) {
+  /* 副題（brand-kicker）を1行に収めるため、マストヘッドを少し締める */
+  .masthead {
+    padding: 12px 16px 10px;
+  }
+
+  .brand-kicker {
+    letter-spacing: 0.12em;
+  }
+
+  .brand h1 {
+    font-size: 28px;
+  }
+
   .tab {
     padding: 12px 10px 10px;
   }
