@@ -1,11 +1,16 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
+  addBookmark,
   applyEditorials,
   fetchClusterBodies,
   fetchClusterDetail,
+  fetchDbStatus,
   fetchEditorials,
   fetchTabRows,
+  postReadEvent,
   refreshFeed,
+  removeBookmark,
+  runMaintenance,
   versionsOfEvent,
 } from './api'
 import type { CoverageKind, FeedTab, StoryRow } from './types'
@@ -15,7 +20,14 @@ const TABS: { id: FeedTab; label: string; hint: string }[] = [
   { id: 'important', label: '重要', hint: '社会的影響が大きい出来事' },
   { id: 'fresh', label: '新着', hint: '直近で入った初報と続報' },
   { id: 'all', label: 'すべて', hint: '版を含む全行' },
+  { id: 'bookmarks', label: 'ブックマーク', hint: '保存したニュース' },
 ]
+
+function formatBytes(bytes: number) {
+  if (!bytes) return ''
+  const mb = bytes / (1024 * 1024)
+  return mb >= 1 ? `${mb.toFixed(1)} MB` : `${Math.max(1, Math.round(bytes / 1024))} KB`
+}
 
 // 表示順（データに無いものは件数0として出さない）
 const CATEGORY_ORDER = [
@@ -75,7 +87,16 @@ function App() {
   const [bodyState, setBodyState] = useState<Record<number, BodyState>>({})
   const [refreshing, setRefreshing] = useState(false)
   const [bgRefreshing, setBgRefreshing] = useState(false)
+  const [dbBytes, setDbBytes] = useState<number | null>(null)
+  const [maintaining, setMaintaining] = useState(false)
   const detailRef = useRef<HTMLElement | null>(null)
+
+  // DB容量の表示（マストヘッド片隅）。失敗しても画面は止めない
+  useEffect(() => {
+    fetchDbStatus()
+      .then((s) => setDbBytes(s.dbBytes))
+      .catch(() => {})
+  }, [])
 
   const key = listKey(tab, category)
   const page = pages[key] ?? null
@@ -180,6 +201,8 @@ function App() {
     if (detailState[selectedClusterId]) return
     const cid = selectedClusterId
     setDetailState((prev) => ({ ...prev, [cid]: 'loading' }))
+    // 閲覧ログ（日次集計の材料）を fire-and-forget で送る
+    postReadEvent(cid)
     fetchClusterDetail(cid)
       .then((detail) => {
         setRows((prev) => {
@@ -296,6 +319,46 @@ function App() {
     setCoverageKind('summary')
   }
 
+  async function toggleBookmark() {
+    if (!selected) return
+    const cid = selected.clusterId
+    const next = !selected.bookmarked
+    try {
+      if (next) await addBookmark(cid)
+      else await removeBookmark(cid)
+      setRows((prev) => {
+        const updated = { ...prev }
+        for (const row of Object.values(updated)) {
+          if (row.clusterId === cid) updated[row.id] = { ...row, bookmarked: next }
+        }
+        return updated
+      })
+      // ブックマークタブの一覧は古くなるので破棄し、次に開いたときに取り直す
+      setPages((prev) => {
+        const updated = { ...prev }
+        for (const k of Object.keys(updated)) {
+          if (k.startsWith('bookmarks|')) delete updated[k]
+        }
+        return updated
+      })
+    } catch {
+      setLoadError('ブックマークの更新に失敗しました。')
+    }
+  }
+
+  async function handleMaintenance() {
+    if (maintaining) return
+    setMaintaining(true)
+    try {
+      const result = await runMaintenance()
+      setDbBytes(result.afterBytes)
+    } catch {
+      setLoadError('データの整理に失敗しました。')
+    } finally {
+      setMaintaining(false)
+    }
+  }
+
   async function handleRefresh() {
     if (refreshing) return
     setRefreshing(true)
@@ -309,6 +372,9 @@ function App() {
       setSelectedId(null)
       setOutletId(null)
       await loadPage(tab, category, 0, false)
+      fetchDbStatus()
+        .then((s) => setDbBytes(s.dbBytes))
+        .catch(() => {})
     } catch {
       setLoadError('更新に失敗しました。')
     } finally {
@@ -338,6 +404,17 @@ function App() {
             {bgRefreshing ? (
               <span className="refreshing-note">背後で更新中…</span>
             ) : null}
+            {dbBytes !== null ? (
+              <span className="db-size">DB {formatBytes(dbBytes)}</span>
+            ) : null}
+            <button
+              type="button"
+              className="refresh-btn"
+              onClick={handleMaintenance}
+              disabled={maintaining}
+            >
+              {maintaining ? '整理中…' : 'データを整理'}
+            </button>
             <button
               type="button"
               className="refresh-btn"
@@ -479,6 +556,22 @@ function App() {
               <p className="event-title">{selected.eventTitle}</p>
               <h2>{selected.title}</h2>
               <p className="detail-lead">{selected.lead}</p>
+              <div className="detail-actions">
+                <button
+                  type="button"
+                  className={
+                    selected.bookmarked
+                      ? 'bookmark-btn is-active'
+                      : 'bookmark-btn'
+                  }
+                  onClick={toggleBookmark}
+                  aria-pressed={!!selected.bookmarked}
+                >
+                  {selected.bookmarked
+                    ? 'ブックマーク済み（削除されません）'
+                    : 'ブックマーク'}
+                </button>
+              </div>
               <ol className="version-rail" aria-label="この出来事の版">
                 {related.map((story) => (
                   <li key={story.id}>

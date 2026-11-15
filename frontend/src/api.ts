@@ -12,6 +12,7 @@ interface RawStoryRow {
   cluster_id: number
   cluster_title: string
   category: string
+  bookmarked?: number
   first_seen_at: string
   last_seen_at: string
   importance_score: number
@@ -59,6 +60,7 @@ interface RawCluster {
   first_seen_at: string
   last_seen_at: string
   importance_score: number
+  bookmarked?: number
 }
 
 interface RawEditorial {
@@ -381,6 +383,7 @@ function rowFromListItem(item: RawStoryRow): StoryRow {
     category: item.category ?? '',
     isImportant: item.importance_score >= IMPORTANT_THRESHOLD,
     isNew: isWithinNewWindow(item.version_created_at),
+    bookmarked: !!item.bookmarked,
     imageUrl: safeUrl(item.image_url) || undefined,
     bodyCount: item.body_count ?? 0,
     bodyChars: item.body_chars ?? 0,
@@ -437,6 +440,7 @@ function rowFromDetailVersion(
     category: cluster.category ?? '',
     isImportant: cluster.importance_score >= IMPORTANT_THRESHOLD,
     isNew: isWithinNewWindow(version.created_at),
+    bookmarked: !!cluster.bookmarked,
     imageUrl: representativeImage(version.articles),
     bodyCount: withBody.length,
     bodyChars: withBody.reduce((n, a) => n + (a.body_text ?? '').length, 0),
@@ -523,4 +527,51 @@ export async function fetchClusterBodies(
 /** ニュースの再取得を依頼する。 */
 export async function refreshFeed(): Promise<void> {
   await fetchJson('/api/refresh', { method: 'POST' })
+}
+
+/* ---------- ブックマーク・閲覧ログ・DB保守 ---------- */
+
+/** ブックマークを追加する（ブックマークしたニュースは保持期間の削除から免除される）。 */
+export async function addBookmark(clusterId: number): Promise<void> {
+  await fetchJson(`/api/bookmarks/${clusterId}`, { method: 'POST' })
+}
+
+/** ブックマークを解除する。 */
+export async function removeBookmark(clusterId: number): Promise<void> {
+  await fetchJson(`/api/bookmarks/${clusterId}`, { method: 'DELETE' })
+}
+
+/** 閲覧ログを1件送る（fire-and-forget: 失敗しても画面は止めない）。 */
+export function postReadEvent(clusterId: number): void {
+  void fetch(`/api/read/${clusterId}`, { method: 'POST' }).catch(() => {})
+}
+
+export interface DbStatus {
+  dbBytes: number
+}
+
+/** DB容量を含むステータスを取得する。 */
+export async function fetchDbStatus(): Promise<DbStatus> {
+  const data = await fetchJson<{ db_bytes?: number }>('/api/status')
+  return { dbBytes: data.db_bytes ?? 0 }
+}
+
+export interface MaintenanceResult {
+  prunedClusters: number
+  beforeBytes: number
+  afterBytes: number
+}
+
+/** 手動整理（prune＋VACUUM）を実行し、前後のDB容量を返す。 */
+export async function runMaintenance(): Promise<MaintenanceResult> {
+  const data = await fetchJson<{
+    pruned_clusters: number
+    before_bytes: number
+    after_bytes: number
+  }>('/api/maintenance', { method: 'POST' })
+  return {
+    prunedClusters: data.pruned_clusters,
+    beforeBytes: data.before_bytes,
+    afterBytes: data.after_bytes,
+  }
 }

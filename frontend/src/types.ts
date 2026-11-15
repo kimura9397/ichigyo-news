@@ -45,6 +45,8 @@ export interface StoryRow {
   bodyChars?: number
   /** 詳細APIで coverages を実データに差し替え済みか */
   detailLoaded?: boolean
+  /** ブックマーク済みか（ブックマークしたニュースは保持期間の削除から免除される） */
+  bookmarked?: boolean
 }
 
-export type FeedTab = 'important' | 'fresh' | 'all'
+export type FeedTab = 'important' | 'fresh' | 'all' | 'bookmarks'

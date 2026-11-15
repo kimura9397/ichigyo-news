@@ -197,6 +197,35 @@
   line-height: 1.35;
 }
 
+.detail-actions {
+  margin-top: 12px;
+}
+
+.bookmark-btn {
+  appearance: none;
+  border: 1px solid var(--line);
+  background: white;
+  color: var(--ink);
+  cursor: pointer;
+  font: inherit;
+  padding: 6px 12px;
+  border-radius: 999px;
+  font-size: 12px;
+}
+
+.bookmark-btn.is-active {
+  border-color: var(--ink);
+  background: var(--ink);
+  color: var(--paper);
+}
+
+.db-size {
+  font-size: 12px;
+  color: var(--ink);
+  opacity: 0.65;
+  white-space: nowrap;
+}
+
 .version-rail {
   display: flex;
   gap: 8px;

@@ -60,6 +60,26 @@ CREATE TABLE IF NOT EXISTS fetch_runs (
   articles_new INTEGER NOT NULL DEFAULT 0,
   pruned_clusters INTEGER NOT NULL DEFAULT 0
 );
+-- ブックマーク（2026-11-15追加）: ブックマーク済みクラスタは保持期間の削除から免除される
+CREATE TABLE IF NOT EXISTS bookmarks (
+  cluster_id INTEGER PRIMARY KEY REFERENCES clusters(id),
+  created_at TEXT NOT NULL
+);
+-- 閲覧ログ（生イベント）: 詳細を開いた記録。30日より古いものは read_daily へ集計して削除する
+CREATE TABLE IF NOT EXISTS read_events (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  cluster_id INTEGER NOT NULL,
+  category TEXT NOT NULL DEFAULT '',
+  opened_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_read_events_opened ON read_events(opened_at);
+-- 閲覧の日次集計（日付×カテゴリ×開封数）: 無期限保持
+CREATE TABLE IF NOT EXISTS read_daily (
+  date TEXT NOT NULL,
+  category TEXT NOT NULL DEFAULT '',
+  opens INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY (date, category)
+);
 `;
 
 /** 既存DBへの後方互換マイグレーション（カラムがなければ足す）。 */

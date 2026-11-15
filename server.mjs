@@ -4,18 +4,25 @@
 // DBが空の初回だけ収集を待つ。
 import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
+import { statSync } from 'node:fs';
 import { extname, join, dirname, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { openDb } from './src/db.mjs';
 import { refresh, fetchEditorials } from './src/collector.mjs';
 import { fetchClusterBodies, fetchTopImages } from './src/body.mjs';
+import { addBookmark, removeBookmark, isBookmarked, recordRead, foldOldReadEvents, pruneOldClusters, pruneFetchRuns } from './src/lifecycle.mjs';
 
 const ROOT = dirname(fileURLToPath(import.meta.url));
 const PUBLIC_DIR = join(ROOT, 'public');
 const PORT = Number(process.env.PORT || 8787);
 const HOST = process.env.HOST || undefined; // 未指定なら全インターフェースで待ち受け
 const ACCESS_TOKEN = process.env.ACCESS_TOKEN || '';
-const db = openDb(join(ROOT, 'data', 'news.db'));
+const DB_PATH = join(ROOT, 'data', 'news.db');
+const db = openDb(DB_PATH);
+
+function dbBytes() {
+  try { return statSync(DB_PATH).size; } catch { return 0; }
+}
 
 const CATEGORIES = ['社会', '政治', '経済', '国際', 'スポーツ', '文化・エンタメ', '科学', 'その他'];
 const IMPORTANT_THRESHOLD = 45; // 重要度スコアv2（2026-11-15再設計）の分布に合わせて再設定（対象が上位約60クラスタになる値）
@@ -72,6 +79,11 @@ function tabWhere(tab, category) {
     // 新着・すべてタブは全バージョンを行表示する従来どおり。
     conds.push('v.version_no = (SELECT MAX(v2.version_no) FROM versions v2 WHERE v2.cluster_id = c.id)');
   }
+  if (tab === 'bookmarks') {
+    // ブックマークタブも各クラスタにつき最新版の行だけを出す（並びはブックマーク日時順）
+    conds.push('EXISTS (SELECT 1 FROM bookmarks b WHERE b.cluster_id = c.id)');
+    conds.push('v.version_no = (SELECT MAX(v2.version_no) FROM versions v2 WHERE v2.cluster_id = c.id)');
+  }
   if (tab === 'new') { conds.push('v.created_at >= ?'); params.push(new Date(Date.now() - 24 * 3600000).toISOString()); }
   if (category && category !== 'すべて') {
     if (category === 'その他') conds.push("c.category = ''");
@@ -84,6 +96,7 @@ function tabOrder(tab) {
   // 同一クラスタ内は常に version_no 降順（最新版が先）
   // 重要タブは Hacker News 式の時間減衰を掛け、古い高スコア行が居座らないようにする（本文ブースト込み）
   if (tab === 'important') return `((c.importance_score + MIN(COALESCE(body_chars, 0) / 2000.0, 5)) / POWER(MAX((julianday('now') - julianday(COALESCE(latest_published, v.created_at))) * 24.0, 0) + 2, 1.2)) DESC, latest_published DESC, v.version_no DESC`;
+  if (tab === 'bookmarks') return '(SELECT b.created_at FROM bookmarks b WHERE b.cluster_id = c.id) DESC, v.version_no DESC';
   if (tab === 'new') return 'v.created_at DESC, v.version_no DESC';
   return 'c.last_seen_at DESC, v.version_no DESC';
 }
@@ -91,6 +104,7 @@ function tabOrder(tab) {
 const ROWS_SELECT = `
     SELECT v.id AS version_id, v.version_no, v.title AS version_title, v.created_at AS version_created_at,
            c.id AS cluster_id, c.title AS cluster_title, c.category, c.first_seen_at, c.last_seen_at, c.importance_score,
+           EXISTS (SELECT 1 FROM bookmarks b WHERE b.cluster_id = c.id) AS bookmarked,
            COUNT(a.id) AS article_count, COUNT(DISTINCT a.source) AS source_count,
            MAX(a.published_at) AS latest_published,
            GROUP_CONCAT(DISTINCT a.source) AS sources,
@@ -139,7 +153,7 @@ async function apiStories(url) {
     kicked = kickRefreshIfStale();
   }
   const tabParam = url.searchParams.get('tab') || 'all';
-  const tab = ['important', 'new', 'all'].includes(tabParam) ? tabParam : 'all';
+  const tab = ['important', 'new', 'all', 'bookmarks'].includes(tabParam) ? tabParam : 'all';
   const catParam = url.searchParams.get('category') || 'すべて';
   const category = ['すべて', ...CATEGORIES].includes(catParam) ? catParam : 'すべて';
   const limit = Math.min(500, Math.max(1, Number.parseInt(url.searchParams.get('limit') || '100', 10) || 100));
@@ -158,6 +172,7 @@ async function apiStories(url) {
 function apiStory(id) {
   const cluster = db.prepare('SELECT * FROM clusters WHERE id = ?').get(id);
   if (!cluster) return null;
+  cluster.bookmarked = isBookmarked(db, id) ? 1 : 0;
   const versions = db.prepare('SELECT * FROM versions WHERE cluster_id = ? ORDER BY version_no').all(id)
     .map((v) => ({
       ...v,
@@ -232,9 +247,32 @@ const server = createServer(async (req, res) => {
       const result = await fetchClusterBodies(db, id);
       return result ? sendJson(res, 200, { ...result, story: apiStory(id) }) : sendJson(res, 404, { error: 'not found' });
     }
+    const bookmarkMatch = p.match(/^\/api\/bookmarks\/(\d+)$/);
+    if (bookmarkMatch && req.method === 'POST') {
+      const id = Number(bookmarkMatch[1]);
+      return addBookmark(db, id) ? sendJson(res, 200, { bookmarked: true }) : sendJson(res, 404, { error: 'not found' });
+    }
+    if (bookmarkMatch && req.method === 'DELETE') {
+      removeBookmark(db, Number(bookmarkMatch[1]));
+      return sendJson(res, 200, { bookmarked: false });
+    }
+    const readMatch = p.match(/^\/api\/read\/(\d+)$/);
+    if (readMatch && req.method === 'POST') {
+      const id = Number(readMatch[1]);
+      return recordRead(db, id) ? sendJson(res, 200, { ok: true }) : sendJson(res, 404, { error: 'not found' });
+    }
+    if (p === '/api/maintenance' && req.method === 'POST') {
+      // 手動整理: 保持期間 prune ＋ 閲覧集計 ＋ fetch_runs 整理 ＋ VACUUM（強制）。前後の容量を返す
+      const before = dbBytes();
+      const foldedReads = foldOldReadEvents(db);
+      const prunedClusters = pruneOldClusters(db);
+      pruneFetchRuns(db);
+      db.exec('VACUUM');
+      return sendJson(res, 200, { pruned_clusters: prunedClusters, folded_reads: foldedReads, before_bytes: before, after_bytes: dbBytes() });
+    }
     if (p === '/api/status' && req.method === 'GET') {
       const counts = db.prepare('SELECT (SELECT COUNT(*) FROM clusters) AS clusters, (SELECT COUNT(*) FROM versions) AS versions, (SELECT COUNT(*) FROM articles) AS articles').get();
-      return sendJson(res, 200, { lastRun: lastFinishedRun(), counts, refreshing: refreshing !== null });
+      return sendJson(res, 200, { lastRun: lastFinishedRun(), counts, refreshing: refreshing !== null, db_bytes: dbBytes() });
     }
     // 静的配信: デコード＋正規化し、public/ 配下から出るパスは拒否する
     let rel;

@@ -3,6 +3,7 @@
 // サーバー/UIから分離してあるので、後から cron 等で常時収集に拡張できる。
 // 外部依存なし（fetch / 正規表現ベースのXMLパースのみ）。LLMは使わない。
 import { openDb} from './db.mjs';
+import { runLifecycle } from './lifecycle.mjs';
 
 export const PAPERS = ['朝日', '毎日', '読売', '産経', '日経'];
 
@@ -523,27 +524,8 @@ clearTimeout(timer);
 }
 }
 
-/**
-* 保持期間: 最終出現が14日より古く、バージョンが1つだけで、重要度が閾値未満のクラスタを
-* 関連行（記事・版・社説）ごと削除する。削除したクラスタ数を返す。
-*/
-export function pruneOldClusters(db, now = new Date()) {
-const cutoff = new Date(now.getTime() - 14 * 24 * 3600000).toISOString();
-const rows = db.prepare(`SELECT c.id FROM clusters c
-WHERE c.last_seen_at < ? AND c.importance_score < 12
-AND (SELECT COUNT(*) FROM versions WHERE cluster_id = c.id) = 1`).all(cutoff);
-if (!rows.length) return 0;
-db.exec('BEGIN IMMEDIATE');
-try {
-const delEd = db.prepare('DELETE FROM editorials WHERE cluster_id = ?');
-const delAr = db.prepare('DELETE FROM articles WHERE cluster_id = ?');
-const delVe = db.prepare('DELETE FROM versions WHERE cluster_id = ?');
-const delCl = db.prepare('DELETE FROM clusters WHERE id = ?');
-for (const r of rows) { delEd.run(r.id); delAr.run(r.id); delVe.run(r.id); delCl.run(r.id); }
-db.exec('COMMIT');
-} catch (e) { try { db.exec('ROLLBACK'); } catch {} throw e; }
-return rows.length;
-}
+// 保持期間（prune）・閲覧集計・VACUUM は src/lifecycle.mjs に分離した
+// （2026-11-15 決定: 保持は最終確認から7日、ブックマーク済みは免除）。
 
 /** 全フィードを取得してDBに取り込む。失敗したフィードはスキップする。 */
 export async function refresh(db, { fetchImpl = fetch, feeds = FEEDS} = {}) {
@@ -564,7 +546,7 @@ allItems.push(...r.value);
 }
 }
 const { seen, inserted } = ingestArticles(db, allItems);
-const pruned = pruneOldClusters(db);
+const { prunedClusters: pruned } = runLifecycle(db);
 db.prepare('UPDATE fetch_runs SET finished_at =?, feeds_ok =?, feeds_failed =?, articles_seen =?, articles_new =?, pruned_clusters =? WHERE id =?')
 .run(new Date().toISOString(), ok, failed, seen, inserted, pruned, Number(run.lastInsertRowid));
 return { feedsOk: ok, feedsFailed: failed, seen, inserted, pruned};
