@@ -110,6 +110,9 @@ function App() {
   const [bgRefreshing, setBgRefreshing] = useState(false)
   const [dbBytes, setDbBytes] = useState<number | null>(null)
   const [maintaining, setMaintaining] = useState(false)
+  // データ整理（保守）の確認ダイアログと、実行結果のトースト
+  const [confirmingMaintenance, setConfirmingMaintenance] = useState(false)
+  const [toast, setToast] = useState<string | null>(null)
   const detailRef = useRef<HTMLElement | null>(null)
 
   // ポーリング（横ディスプレイ常駐表示用、2026-11-15 ユーザー承認）。
@@ -560,14 +563,25 @@ function App() {
     }
   }
 
+  // トーストは一定時間で自動的に消す
+  useEffect(() => {
+    if (!toast) return
+    const t = setTimeout(() => setToast(null), 6000)
+    return () => clearTimeout(t)
+  }, [toast])
+
   async function handleMaintenance() {
     if (maintaining) return
+    setConfirmingMaintenance(false)
     setMaintaining(true)
     try {
       const result = await runMaintenance()
       setDbBytes(result.afterBytes)
+      setToast(
+        `古いニュースを ${result.prunedClusters} 件削除しました（DB ${formatBytes(result.beforeBytes)} → ${formatBytes(result.afterBytes)}）`,
+      )
     } catch {
-      setLoadError('データの整理に失敗しました。')
+      setToast('古いデータの削除と圧縮に失敗しました。')
     } finally {
       setMaintaining(false)
     }
@@ -631,50 +645,143 @@ function App() {
             {bgRefreshing ? (
               <span className="refreshing-note">背後で更新中…</span>
             ) : null}
-            {dbBytes !== null ? (
-              <span className="db-size">DB {formatBytes(dbBytes)}</span>
-            ) : null}
-            <button
-              type="button"
-              className={polling ? 'refresh-btn is-active' : 'refresh-btn'}
-              onClick={() => setPolling((v) => !v)}
-              aria-pressed={polling}
-            >
-              {polling ? 'ポーリング中' : 'ポーリング'}
-            </button>
-            {polling ? (
-              <select
-                className="poll-interval"
-                value={pollMinutes}
-                onChange={(e) => setPollMinutes(Number(e.target.value))}
-                aria-label="ポーリング間隔"
+            <div className="util-set">
+              <button
+                type="button"
+                className="switch"
+                role="switch"
+                aria-checked={polling}
+                onClick={() => setPolling((v) => !v)}
+                title="ポーリング（一定間隔で自動更新）"
               >
-                {POLL_INTERVALS.map((m) => (
-                  <option key={m} value={m}>
-                    {m}分
-                  </option>
-                ))}
-              </select>
-            ) : null}
+                <span className="switch-track">
+                  <span className="switch-thumb" />
+                </span>
+                <span className="switch-label">ポーリング</span>
+              </button>
+              {polling ? (
+                <div
+                  className="segmented"
+                  role="group"
+                  aria-label="ポーリング間隔"
+                >
+                  {POLL_INTERVALS.map((m) => (
+                    <button
+                      key={m}
+                      type="button"
+                      className={pollMinutes === m ? 'seg is-active' : 'seg'}
+                      onClick={() => setPollMinutes(m)}
+                      aria-pressed={pollMinutes === m}
+                    >
+                      {m}分
+                    </button>
+                  ))}
+                </div>
+              ) : null}
+            </div>
+            <div className="util-set db-set">
+              {dbBytes !== null ? (
+                <span className="db-size" title="データベースの容量">
+                  DB {formatBytes(dbBytes)}
+                </span>
+              ) : null}
+              <button
+                type="button"
+                className="icon-btn"
+                onClick={() => setConfirmingMaintenance(true)}
+                disabled={maintaining}
+                title="古いデータを削除してDBを圧縮"
+                aria-label="古いデータを削除してデータベースを圧縮"
+              >
+                <svg
+                  width="17"
+                  height="17"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  aria-hidden="true"
+                >
+                  <polyline points="3 6 5 6 21 6" />
+                  <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+                  <line x1="10" y1="11" x2="10" y2="17" />
+                  <line x1="14" y1="11" x2="14" y2="17" />
+                </svg>
+              </button>
+            </div>
             <button
               type="button"
-              className="refresh-btn"
-              onClick={handleMaintenance}
-              disabled={maintaining}
-            >
-              {maintaining ? '整理中…' : 'データを整理'}
-            </button>
-            <button
-              type="button"
-              className="refresh-btn"
+              className="icon-btn"
               onClick={handleRefresh}
               disabled={refreshing}
+              title="最新ニュースに更新"
+              aria-label="最新ニュースに更新"
             >
-              {refreshing ? '更新中…' : '更新'}
+              <svg
+                className={refreshing ? 'spin' : undefined}
+                width="17"
+                height="17"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                aria-hidden="true"
+              >
+                <polyline points="23 4 23 10 17 10" />
+                <polyline points="1 20 1 14 7 14" />
+                <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" />
+              </svg>
             </button>
           </div>
         </div>
       </header>
+
+      {confirmingMaintenance ? (
+        <div
+          className="modal-overlay"
+          onClick={() => setConfirmingMaintenance(false)}
+        >
+          <div
+            className="modal-card"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="maintenance-dialog-title"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h2 id="maintenance-dialog-title">古いデータを削除しますか？</h2>
+            <p>
+              7日より前のニュース（ブックマークしたものを除く）を削除し、データベースを圧縮します。
+            </p>
+            <div className="modal-actions">
+              <button
+                type="button"
+                className="modal-btn"
+                onClick={() => setConfirmingMaintenance(false)}
+              >
+                キャンセル
+              </button>
+              <button
+                type="button"
+                className="modal-btn is-danger"
+                onClick={() => void handleMaintenance()}
+                disabled={maintaining}
+              >
+                {maintaining ? '削除中…' : '削除して圧縮する'}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {toast ? (
+        <div className="toast" role="status">
+          {toast}
+        </div>
+      ) : null}
 
       {polling ? (
         <div
