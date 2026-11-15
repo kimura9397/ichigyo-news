@@ -1,7 +1,6 @@
 // フォントスタックの静的検査（2026-11-15 ユーザー実機の「文字が掠れる」報告への是正を固定する）。
-// - 明朝（--serif）を使ってよいのはブランド要素だけ: マストヘッドのタイトル（.brand h1）のみ
-//   （2026-11-16 ユーザー決定で詳細タイトルも含め全面ゴシック化）。本文サイズの要素に
-//   明朝を戻すと Windows で掠れる。
+// - 明朝（--serif）を使ってよいのはブランド要素だけ: マストヘッドのタイトル（.brand h1）と
+//   詳細タイトル（.detail-head h2）。本文サイズの要素に明朝を戻すと Windows で掠れる。
 // - ゴシック（--sans）は Windows で掠れない構成にする: Hiragino Sans（Mac）→ Noto Sans JP →
 //   游ゴシック差し替え（'Yu Gothic Remap'）→ 素の Yu Gothic UI / Yu Gothic の順。
 // - 'Yu Gothic Remap' は @font-face で 400 に Yu Gothic Medium、700 に Yu Gothic Bold を割り当てる
@@ -59,23 +58,23 @@ test("@font-face 'Yu Gothic Remap': 400 に Medium、700 に Bold を割り当�
   assert.ok(byWeight.get('700')?.includes("local('Yu Gothic Bold')"), '700 は Yu Gothic Bold のはず');
 });
 
-test('App.css: 明朝（--serif）を使ってよいのはブランド要素（.brand h1）だけ', () => {
-  const allowed = new Set(['.brand h1']);
+test('App.css: 明朝（--serif）を使ってよいのはブランド要素だけ', () => {
+  const allowed = new Set(['.brand h1', '.detail-head h2']);
   const offenders = [];
   for (const [selector, body] of rulesBySelector(appCss)) {
     if (body.includes('font-family: var(--serif)') && !allowed.has(selector)) offenders.push(selector);
   }
   assert.deepEqual(offenders, [], `ブランド要素以外で明朝が使われています: ${offenders.join(', ')}`);
-  // ブランド側の1件は明朝のままであることも固定する
+  // ブランド側の2件は明朝のままであることも固定する
   const rules = rulesBySelector(appCss);
   for (const selector of allowed) {
     assert.ok(rules.get(selector)?.includes('font-family: var(--serif)'), `${selector} は明朝のはず`);
   }
 });
 
-test('App.css: 本文系の見出し（.detail-head h2 / .paper h3 / .paper-owner）はゴシック', () => {
+test('App.css: 本文系の見出し（.paper h3 / .paper-owner）はゴシック', () => {
   const rules = rulesBySelector(appCss);
-  for (const selector of ['.detail-head h2', '.paper h3', '.paper-owner']) {
+  for (const selector of ['.paper h3', '.paper-owner']) {
     const body = rules.get(selector);
     assert.ok(body, `${selector} のルールが見つかりません`);
     assert.ok(body.includes('font-family: var(--sans)'), `${selector} は var(--sans) のはず`);

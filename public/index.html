@@ -10,39 +10,22 @@
     <script>
       // テーマとフォントサイズは描画前に適用し、ちらつきを防ぐ（設定は localStorage の ichigyo:* ）
       try {
-        // テーマプリセット（2026-11-16〜）: ichigyo:themePreset に
-        // kami（紙）/ koshi（古紙）/ shirokuro（白黒）/ akari（灯）/ sumi（墨）/
-        // system（端末）を保存する。
-        // 旧キー（ichigyo:theme / ichigyo:accent）しか無い場合はここで移行する
-        // （ダーク→墨、端末→system、それ以外→紙。アクセント単独設定は廃止）。
-        var PRESETS = ['kami', 'koshi', 'shirokuro', 'akari', 'sumi', 'system']
-        var p = localStorage.getItem('ichigyo:themePreset')
-        if (PRESETS.indexOf(p) < 0) {
-          var old = localStorage.getItem('ichigyo:theme')
-          p = old === 'dark' ? 'sumi' : old === 'system' ? 'system' : 'kami'
-          try {
-            localStorage.setItem('ichigyo:themePreset', p)
-            localStorage.removeItem('ichigyo:theme')
-            localStorage.removeItem('ichigyo:accent')
-          } catch (e2) {
-            /* 移行の保存に失敗しても表示は続ける */
-          }
-        }
-        var resolved =
-          p === 'system'
-            ? window.matchMedia('(prefers-color-scheme: dark)').matches
-              ? 'sumi'
-              : 'kami'
-            : p
-        document.documentElement.dataset.theme = resolved
+        var t = localStorage.getItem('ichigyo:theme') || 'light'
+        var dark =
+          t === 'dark' ||
+          (t === 'system' &&
+            window.matchMedia('(prefers-color-scheme: dark)').matches)
+        document.documentElement.dataset.theme = dark ? 'dark' : 'light'
+        document.documentElement.dataset.accent =
+          localStorage.getItem('ichigyo:accent') || 'shu'
         document.documentElement.dataset.fontSize =
           localStorage.getItem('ichigyo:fontSize') || 'medium'
       } catch (e) {
-        /* 読めなければ既定（紙／中）で表示する */
+        /* 読めなければ既定（ライト／中）で表示する */
       }
     </script>
-    <script type="module" crossorigin src="/assets/index-C4vBXoo6.js"></script>
-    <link rel="stylesheet" crossorigin href="/assets/index-cy3OEVuj.css">
+    <script type="module" crossorigin src="/assets/index-BoMuQAlY.js"></script>
+    <link rel="stylesheet" crossorigin href="/assets/index-BMIR55_4.css">
   </head>
   <body>
     <div id="root"></div>
