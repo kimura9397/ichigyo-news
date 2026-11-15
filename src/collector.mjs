@@ -316,6 +316,30 @@ if (AGGREGATORS.includes(source)) return 0; // アグリゲータは媒体数に
 return MAJOR_SOURCES.includes(source) ? 3 : 1;
 }
 
+/**
+ * カテゴリ補正: 見出しに明確なスポーツ語が含まれていれば「スポーツ」に分類する。
+ * フィード由来のカテゴリは付け間違いが少なくない（例: 車いすマラソンのニュースが
+ * 「国際」で届く、カテゴリ空欄で届く）。スポーツ語は誤判定がほぼ無い語に絞る。
+ * スポーツへの補正のみを行い、それ以外は元のカテゴリをそのまま返す（最小限の補正）。
+ */
+export const SPORTS_KEYWORDS = [
+'マラソン', '大相撲', '初場所', '夏場所', '名古屋場所', '秋場所', '九州場所', '横綱', '大関', '力士',
+'競馬', '競輪', '競艇', 'プロ野球', '高校野球', '甲子園', 'センバツ',
+'サッカー', 'ワールドカップ', 'W杯', 'Jリーグ', 'Ｊリーグ', 'Bリーグ', 'Ｂリーグ', 'Vリーグ', '大リーグ', 'メジャーリーグ', 'プレミアリーグ',
+'オリンピック', 'パラリンピック', '五輪',
+'ラグビー', 'テニス', 'ゴルフ', 'バスケットボール', 'バレーボール', 'バドミントン', '卓球',
+'柔道', '剣道', '空手', 'ボクシング', 'レスリング', '競泳', '水泳', '陸上競技', '駅伝',
+'スキー', 'スノーボード', 'フィギュアスケート', 'スピードスケート', 'アイスホッケー',
+'ハンドボール', 'ホッケー', 'フェンシング', '体操', '新体操', 'トライアスロン', 'カヌー',
+'セーリング', 'アーチェリー', 'ウエイトリフティング', 'テコンドー', 'サーフィン',
+'スケートボード', 'スポーツクライミング', 'モータースポーツ',
+];
+export function refineCategory(title, category) {
+const t = String(title || '');
+for (const kw of SPORTS_KEYWORDS) if (t.includes(kw)) return 'スポーツ';
+return category || '';
+}
+
 /** 配信記事の署名: クラスタリングと同じ正規化をかけたタイトル。タイトルが空なら要約冒頭で代用する。 */
 export function articleSignature(article) {
 const base = String(article.title || '').trim() || String(article.summary || '').slice(0, 60);
@@ -323,14 +347,19 @@ return normalizeForMatch(base);
 }
 
 /**
-* 重要度スコア（2026-11-15 改善: B 配信の重複割引 + D 社説ボーナス + A カテゴリ減衰）。
-* 旧式は「媒体の重み合計 + 記事総数」が主成分で、通信社配信の複製や
-* 全社一斉に報じる予定型イベント（スポーツ大会等）を過大評価していた。
-* - B: 記事を正規化タイトルの署名でグループ化する。記事数成分はグループ数にし、
-*      媒体の重みはグループごとに最大の重みを1回だけ数える（配信の複製は1回分、
-*      独自報道は社ごとに数える）。
+* 重要度スコア v2（2026-11-15 再設計）。
+* v1（同日先行改善）の式は署名グループごとの重み合計が主成分で、言い換え見出しの多い
+* 大型クラスタほど重みが積み上がり膨張した（例: 接続障害クラスタ 124→285）。
+* v2 は「主要媒体が独自に報じているか」を軸にし、各成分に上限と圧縮を入れて暴走を防ぐ。
+* - 主要媒体成分: 署名グループのうち、最大重みの媒体が主要媒体（重み3）のグループだけを
+*      本計算に入れる。その重み合計 W に log 圧縮 10 × log2(1 + W) を掛ける。
+* - 広がり成分: それ以外の媒体（重み1）のグループは +0.5/グループ、上限 +5。
+*      アグリゲータのみのグループ（重み0）はどちらの成分にも入れない。
+* - グループ数成分: 署名グループ総数に上限を付け min(G, 20) × 0.8。
+* - バージョン成分: min(版数, 5) × 2（続報の積み上がりにも上限）。
+* - 新しさボーナス: 最新記事が6時間以内 +5 / 24時間以内 +2（従来どおり）。
 * - A: カテゴリがスポーツ / 文化・エンタメのクラスタは、社説ボーナスを除いた
-*      小計に ×0.7 の減衰を掛ける。
+*      小計に ×0.7 の減衰を掛ける。カテゴリは refineCategory で補正済みの前提。
 * - D: 社説が found で確認できた媒体1つにつき +6（上限 +18）。各紙が社説で
 *      取り上げたニュースは「重要」と判断された証拠とみなす。
 */
@@ -341,16 +370,23 @@ SELECT (SELECT COUNT(*) FROM versions WHERE cluster_id = ?) AS versions,
 MAX(published_at) AS latest
 FROM articles WHERE cluster_id = ?`).get(clusterId, clusterId);
 const articles = db.prepare('SELECT source, title, summary FROM articles WHERE cluster_id = ?').all(clusterId);
-// B: 署名グループごとに最大の媒体重みを保持する
+// 署名グループごとに最大の媒体重みを保持する（配信の複製は1グループに畳む）
 const groupMaxWeight = new Map();
 for (const a of articles) {
 const sig = articleSignature(a);
 const w = sourceWeight(a.source);
 if (!groupMaxWeight.has(sig) || groupMaxWeight.get(sig) < w) groupMaxWeight.set(sig, w);
 }
-let sourceScore = 0;
-for (const w of groupMaxWeight.values()) sourceScore += w;
-let score = sourceScore + groupMaxWeight.size + row.versions * 2;
+let majorWeight = 0; // 主要媒体グループの重み合計 W
+let otherGroups = 0; // 主要媒体でもアグリゲータでもない媒体のグループ数
+for (const w of groupMaxWeight.values()) {
+if (w >= 3) majorWeight += w;
+else if (w === 1) otherGroups++;
+}
+let score = 10 * Math.log2(1 + majorWeight)
++ Math.min(otherGroups * 0.5, 5)
++ Math.min(groupMaxWeight.size, 20) * 0.8
++ Math.min(row.versions, 5) * 2;
 if (row.latest) {
 const ageH = (Date.now() - new Date(row.latest).getTime()) / 3600000;
 if (ageH <= 6) score += 5; else if (ageH <= 24) score += 2;
@@ -431,7 +467,7 @@ versionId = latest.id;
 }
 db.prepare('UPDATE clusters SET last_seen_at = ? WHERE id = ?').run(nowIso, clusterId);
 } else {
-const info = db.prepare('INSERT INTO clusters (title, category, first_seen_at, last_seen_at) VALUES (?, ?, ?, ?)').run(title, raw.category || '', raw.publishedAt || nowIso, nowIso);
+const info = db.prepare('INSERT INTO clusters (title, category, first_seen_at, last_seen_at) VALUES (?, ?, ?, ?)').run(title, refineCategory(title, raw.category || ''), raw.publishedAt || nowIso, nowIso);
 clusterId = Number(info.lastInsertRowid);
 const v = db.prepare('INSERT INTO versions (cluster_id, version_no, title, created_at) VALUES (?, 1, ?, ?)').run(clusterId, title, nowIso);
 versionId = Number(v.lastInsertRowid);

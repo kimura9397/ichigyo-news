@@ -182,7 +182,7 @@ export function outletOf(source: string): { id: string; name: string } {
 
 /* ---------- 変換 ---------- */
 
-const IMPORTANT_THRESHOLD = 12 // server.mjs の重要タブ閾値と合わせる
+const IMPORTANT_THRESHOLD = 45 // server.mjs の重要タブ閾値と合わせる
 const NEW_WINDOW_MS = 24 * 3600 * 1000
 
 function isWithinNewWindow(iso: string): boolean {

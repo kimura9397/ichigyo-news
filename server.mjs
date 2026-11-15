@@ -18,7 +18,7 @@ const ACCESS_TOKEN = process.env.ACCESS_TOKEN || '';
 const db = openDb(join(ROOT, 'data', 'news.db'));
 
 const CATEGORIES = ['社会', '政治', '経済', '国際', 'スポーツ', '文化・エンタメ', '科学', 'その他'];
-const IMPORTANT_THRESHOLD = 12;
+const IMPORTANT_THRESHOLD = 45; // 重要度スコアv2（2026-11-15再設計）の分布に合わせて再設定（対象が上位約60クラスタになる値）
 
 let refreshing = null;
 function doRefresh() {
