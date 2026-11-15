@@ -305,9 +305,18 @@
 
 .paper-body {
   margin: 0;
+  max-width: 42em;
   font-size: 16px;
   line-height: 1.9;
   color: var(--ink);
+}
+
+.paper-body p {
+  margin: 0 0 1em;
+}
+
+.paper-body p:last-child {
+  margin-bottom: 0;
 }
 
 .muted,
@@ -381,8 +390,48 @@
   cursor: wait;
 }
 
-.paper-body {
-  white-space: pre-line;
+/* --- ポーリング（常駐表示）と新着ハイライト --- */
+
+.refresh-btn.is-active {
+  background: var(--ink);
+  color: var(--paper);
+}
+
+.poll-interval {
+  font: inherit;
+  font-size: 12px;
+  padding: 6px 4px;
+  border: 1px solid var(--ink);
+  border-radius: 4px;
+  background: transparent;
+  color: var(--ink);
+  cursor: pointer;
+}
+
+.poll-progress {
+  height: 3px;
+  background: color-mix(in srgb, var(--line) 55%, white);
+}
+
+.poll-progress-bar {
+  height: 100%;
+  background: var(--vermillion);
+  transition: width 0.25s linear;
+}
+
+.row.is-new {
+  background: color-mix(in srgb, var(--vermillion) 10%, white);
+  animation: row-new-pulse 1.6s ease-in-out 3;
+}
+
+@keyframes row-new-pulse {
+  0%,
+  100% {
+    background: color-mix(in srgb, var(--vermillion) 6%, white);
+  }
+  50% {
+    background: color-mix(in srgb, var(--vermillion) 24%, white);
+  }
 }
 
 .paper-link {

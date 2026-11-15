@@ -29,6 +29,25 @@ function formatBytes(bytes: number) {
   return mb >= 1 ? `${mb.toFixed(1)} MB` : `${Math.max(1, Math.round(bytes / 1024))} KB`
 }
 
+const BASE_TITLE = '一行ニュース — 同じニュースは、一行。'
+const POLL_INTERVALS = [2, 5, 10]
+
+/** 本文テキストを段落ごとに <p> で描く（改行を行・段落の区切りとして扱う）。 */
+function Paragraphs({ text }: { text: string }) {
+  const paras = text
+    .split(/\n+/)
+    .map((s) => s.trim())
+    .filter(Boolean)
+  if (paras.length === 0) return null
+  return (
+    <div className="paper-body">
+      {paras.map((p, i) => (
+        <p key={i}>{p}</p>
+      ))}
+    </div>
+  )
+}
+
 // 表示順（データに無いものは件数0として出さない）
 const CATEGORY_ORDER = [
   '社会',
@@ -90,6 +109,64 @@ function App() {
   const [dbBytes, setDbBytes] = useState<number | null>(null)
   const [maintaining, setMaintaining] = useState(false)
   const detailRef = useRef<HTMLElement | null>(null)
+
+  // ポーリング（横ディスプレイ常駐表示用、2026-11-15 ユーザー承認）。
+  // ON/OFF と間隔は localStorage に保存し、リロード後も復元する。
+  const [polling, setPolling] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem('ichigyo:polling') === '1'
+    } catch {
+      return false
+    }
+  })
+  const [pollMinutes, setPollMinutes] = useState<number>(() => {
+    try {
+      const v = Number(localStorage.getItem('ichigyo:pollMinutes'))
+      return POLL_INTERVALS.includes(v) ? v : 5
+    } catch {
+      return 5
+    }
+  })
+  /** 次回ポーリング更新までの残り割合（1→0）。残り時間バーに使う */
+  const [pollProgress, setPollProgress] = useState(1)
+  /** ポーリングで新しく現れたクラスタ（ハイライト対象） */
+  const [highlightClusters, setHighlightClusters] = useState<ReadonlySet<number>>(
+    new Set(),
+  )
+  /** 未確認の新着重要件数（タブタイトルに出す） */
+  const [unseenCount, setUnseenCount] = useState(0)
+  /** 重要タブの前回スナップショット（clusterId -> 最新の版番号） */
+  const pollSnapshotRef = useRef<Map<number, number> | null>(null)
+  const nextPollAtRef = useRef(0)
+  const wakeLockRef = useRef<{ release: () => void } | null>(null)
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('ichigyo:polling', polling ? '1' : '0')
+    } catch {
+      /* 保存できなくても動作は続ける */
+    }
+  }, [polling])
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('ichigyo:pollMinutes', String(pollMinutes))
+    } catch {
+      /* 同上 */
+    }
+  }, [pollMinutes])
+
+  // 未確認件数をタブタイトルに出す
+  useEffect(() => {
+    document.title =
+      unseenCount > 0 ? `(${unseenCount}) ${BASE_TITLE}` : BASE_TITLE
+  }, [unseenCount])
+
+  /** 一覧を操作したら「確認済み」として件数とハイライトを消す。 */
+  const acknowledgeNew = useCallback(() => {
+    setUnseenCount(0)
+    setHighlightClusters(new Set())
+  }, [])
 
   // DB容量の表示（マストヘッド片隅）。失敗しても画面は止めない
   useEffect(() => {
@@ -171,6 +248,105 @@ function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [bgRefreshing])
 
+  // ポーリング1回分: サーバー側の再取得を依頼し、表示中の一覧を取り直してから、
+  // 重要タブを前回スナップショットと比較し、新規クラスタと版が増えたクラスタを検出する
+  const pollTick = useCallback(async () => {
+    try {
+      await refreshFeed()
+    } catch {
+      /* 失敗しても次の周期で再試行する */
+    }
+    await loadPage(tab, category, 0, false)
+    try {
+      const page = await fetchTabRows('important', ALL_CATEGORY, 0, 100)
+      const prev = pollSnapshotRef.current
+      pollSnapshotRef.current = new Map(
+        page.rows.map((r) => [r.clusterId, r.version]),
+      )
+      if (!prev) return // 初回は基準作りのみ（既存分を新着扱いしない）
+      const fresh = page.rows.filter((r) => {
+        const before = prev.get(r.clusterId)
+        return before === undefined || r.version > before
+      })
+      if (fresh.length > 0) {
+        setUnseenCount((n) => n + fresh.length)
+        setHighlightClusters(
+          (old) => new Set([...old, ...fresh.map((r) => r.clusterId)]),
+        )
+      }
+    } catch {
+      /* 検出に失敗してもポーリング自体は続ける */
+    }
+  }, [tab, category, loadPage])
+
+  // ポーリングのタイマーと残り時間バーの進行
+  useEffect(() => {
+    if (!polling) {
+      pollSnapshotRef.current = null
+      setPollProgress(1)
+      return
+    }
+    // 開始時点の重要タブを基準スナップショットにする（既存分を新着にしない）
+    if (pollSnapshotRef.current === null) {
+      fetchTabRows('important', ALL_CATEGORY, 0, 100)
+        .then((page) => {
+          if (pollSnapshotRef.current === null) {
+            pollSnapshotRef.current = new Map(
+              page.rows.map((r) => [r.clusterId, r.version]),
+            )
+          }
+        })
+        .catch(() => {})
+    }
+    const intervalMs = pollMinutes * 60 * 1000
+    nextPollAtRef.current = Date.now() + intervalMs
+    const tickTimer = setInterval(() => {
+      nextPollAtRef.current = Date.now() + intervalMs
+      void pollTick()
+    }, intervalMs)
+    const progressTimer = setInterval(() => {
+      const remain = Math.max(0, nextPollAtRef.current - Date.now())
+      setPollProgress(Math.min(1, remain / intervalMs))
+    }, 250)
+    return () => {
+      clearInterval(tickTimer)
+      clearInterval(progressTimer)
+    }
+  }, [polling, pollMinutes, pollTick])
+
+  // ポーリング中は画面スリープを防ぐ（Wake Lock、対応環境のみ）
+  useEffect(() => {
+    if (!polling) return
+    const nav = navigator as Navigator & {
+      wakeLock?: {
+        request: (type: 'screen') => Promise<{ release: () => void }>
+      }
+    }
+    if (!nav.wakeLock) return
+    const acquire = async () => {
+      try {
+        wakeLockRef.current = await nav.wakeLock!.request('screen')
+      } catch {
+        /* 取得できなくてもポーリングは続ける */
+      }
+    }
+    void acquire()
+    // Wake Lock はタブが不可視になると自動で解放されるため、戻ってきたら取り直す
+    const onVisibility = () => {
+      if (document.visibilityState === 'visible') void acquire()
+    }
+    document.addEventListener('visibilitychange', onVisibility)
+    return () => {
+      document.removeEventListener('visibilitychange', onVisibility)
+      try {
+        wakeLockRef.current?.release()
+      } catch {
+        /* 解放済みでも問題ない */
+      }
+      wakeLockRef.current = null
+    }
+  }, [polling])
+
   const visible = useMemo(() => {
     const ids = page?.ids ?? []
     return ids
@@ -187,10 +363,6 @@ function App() {
   useEffect(() => {
     if (!selectedId && visible.length > 0) setSelectedId(visible[0].id)
   }, [selectedId, visible])
-
-  const activeOutlet =
-    selected?.coverages.find((coverage) => coverage.outletId === outletId) ??
-    selected?.coverages[0]
 
   const related = selected ? versionsOfEvent(allRows, selected.eventId) : []
 
@@ -292,7 +464,33 @@ function App() {
       })
   }, [selectedClusterId, detailState, selectedBodyState])
 
+  // 報道・社説の切替は「中身がある場合だけ」出す（空表示の廃止、2026-11-15 ユーザー要望）。
+  // 取得の試行前・試行中は切替を出したままにし、完了して初めて「無かった」と確定したら隠す。
+  const hasBodyCoverage = selected?.coverages.some((c) => c.body) ?? false
+  const hasEditorialCoverage =
+    selected?.coverages.some((c) => c.editorial) ?? false
+  const showReportTab = selectedBodyState !== 'done' || hasBodyCoverage
+  const showEditorialTab =
+    selectedEditorialState !== 'done' || hasEditorialCoverage
+  const effectiveKind: CoverageKind =
+    (coverageKind === 'report' && !showReportTab) ||
+    (coverageKind === 'editorial' && !showEditorialTab)
+      ? 'summary'
+      : coverageKind
+  // 報道ビューでは本文が取れた媒体だけ、社説ビューでは社説がある媒体だけを出す
+  const visibleCoverages = !selected
+    ? []
+    : effectiveKind === 'report'
+      ? selected.coverages.filter((c) => c.body)
+      : effectiveKind === 'editorial'
+        ? selected.coverages.filter((c) => c.editorial)
+        : selected.coverages
+  const activeOutlet =
+    visibleCoverages.find((coverage) => coverage.outletId === outletId) ??
+    visibleCoverages[0]
+
   function openStory(id: string) {
+    acknowledgeNew()
     setSelectedId(id)
     setOutletId(null)
     setCoverageKind('summary')
@@ -306,6 +504,7 @@ function App() {
   }
 
   function switchTab(next: FeedTab) {
+    acknowledgeNew()
     setTab(next)
     setSelectedId(null)
     setOutletId(null)
@@ -313,6 +512,7 @@ function App() {
   }
 
   function switchCategory(next: string) {
+    acknowledgeNew()
     setCategory(next)
     setSelectedId(null)
     setOutletId(null)
@@ -385,6 +585,19 @@ function App() {
   const detailLoading = selected ? !selected.detailLoaded : false
   const editorialLoading = selectedEditorialState === 'loading'
   const bodyLoading = selectedBodyState === 'loading'
+  // 要約は常時、報道・社説は中身がある（または取得試行中）場合だけ切替を出す
+  const visibleKinds = (
+    [
+      ['summary', '要約'],
+      ['report', '報道'],
+      ['editorial', '社説'],
+    ] as const
+  ).filter(
+    ([kind]) =>
+      kind === 'summary' ||
+      (kind === 'report' && showReportTab) ||
+      (kind === 'editorial' && showEditorialTab),
+  )
   const hasMore = page !== null && page.ids.length < page.total
   const counts = catCounts[tab] ?? []
   const totalInTab = counts.reduce((n, c) => n + c.count, 0)
@@ -409,6 +622,28 @@ function App() {
             ) : null}
             <button
               type="button"
+              className={polling ? 'refresh-btn is-active' : 'refresh-btn'}
+              onClick={() => setPolling((v) => !v)}
+              aria-pressed={polling}
+            >
+              {polling ? 'ポーリング中' : 'ポーリング'}
+            </button>
+            {polling ? (
+              <select
+                className="poll-interval"
+                value={pollMinutes}
+                onChange={(e) => setPollMinutes(Number(e.target.value))}
+                aria-label="ポーリング間隔"
+              >
+                {POLL_INTERVALS.map((m) => (
+                  <option key={m} value={m}>
+                    {m}分
+                  </option>
+                ))}
+              </select>
+            ) : null}
+            <button
+              type="button"
               className="refresh-btn"
               onClick={handleMaintenance}
               disabled={maintaining}
@@ -426,6 +661,22 @@ function App() {
           </div>
         </div>
       </header>
+
+      {polling ? (
+        <div
+          className="poll-progress"
+          role="progressbar"
+          aria-label="次の更新までの残り時間"
+          aria-valuemin={0}
+          aria-valuemax={100}
+          aria-valuenow={Math.round(pollProgress * 100)}
+        >
+          <div
+            className="poll-progress-bar"
+            style={{ width: `${pollProgress * 100}%` }}
+          />
+        </div>
+      ) : null}
 
       <nav className="tabs" aria-label="ニュースの種類">
         {TABS.map((item) => (
@@ -471,7 +722,12 @@ function App() {
       </div>
 
       <div className="workspace">
-        <section className="list-pane" aria-label="ニュース一覧">
+        <section
+          className="list-pane"
+          aria-label="ニュース一覧"
+          onFocus={acknowledgeNew}
+          onPointerDown={acknowledgeNew}
+        >
           {page === null ? (
             <p className="empty">読み込み中…</p>
           ) : visible.length === 0 ? (
@@ -483,11 +739,18 @@ function App() {
               <ul>
                 {visible.map((story) => {
                   const isActive = selected?.id === story.id
+                  const rowClass = [
+                    'row',
+                    isActive ? 'is-active' : '',
+                    highlightClusters.has(story.clusterId) ? 'is-new' : '',
+                  ]
+                    .filter(Boolean)
+                    .join(' ')
                   return (
                     <li key={story.id}>
                       <button
                         type="button"
-                        className={isActive ? 'row is-active' : 'row'}
+                        className={rowClass}
                         onClick={() => openStory(story.id)}
                       >
                         {story.imageUrl ? (
@@ -594,17 +857,17 @@ function App() {
 
             {detailLoading ? (
               <p className="empty">詳細を読み込み中…</p>
-            ) : activeOutlet ? (
+            ) : (
               <>
                 <div className="outlet-bar" role="tablist" aria-label="新聞社">
-                  {selected.coverages.map((coverage) => (
+                  {visibleCoverages.map((coverage) => (
                     <button
                       key={coverage.outletId}
                       type="button"
                       role="tab"
-                      aria-selected={coverage.outletId === activeOutlet.outletId}
+                      aria-selected={coverage.outletId === activeOutlet?.outletId}
                       className={
-                        coverage.outletId === activeOutlet.outletId
+                        coverage.outletId === activeOutlet?.outletId
                           ? 'outlet is-active'
                           : 'outlet'
                       }
@@ -619,42 +882,37 @@ function App() {
                 </div>
 
                 <div className="kind-bar" role="tablist" aria-label="記事の種類">
-                  {(
-                    [
-                      ['summary', '要約'],
-                      ['report', '報道'],
-                      ['editorial', '社説'],
-                    ] as const
-                  ).map(([kind, label]) => (
+                  {visibleKinds.map(([kind, label]) => (
                     <button
                       key={kind}
                       type="button"
                       role="tab"
-                      aria-selected={coverageKind === kind}
+                      aria-selected={effectiveKind === kind}
                       className={
-                        coverageKind === kind ? 'kind is-active' : 'kind'
+                        effectiveKind === kind ? 'kind is-active' : 'kind'
                       }
-                      onClick={() => setCoverageKind(kind)}
+                      onClick={() => {
+                        setCoverageKind(kind)
+                        setOutletId(null)
+                      }}
                     >
                       {label}
                     </button>
                   ))}
                 </div>
 
-                <div className="paper">
-                  <p className="paper-kicker">
-                    {activeOutlet.outletName}
-                    <time dateTime={activeOutlet.publishedAt}>
-                      {formatWhen(activeOutlet.publishedAt)}
-                    </time>
-                  </p>
-                  <h3>{activeOutlet.headline}</h3>
-                  {coverageKind === 'editorial' ? (
-                    editorialLoading ? (
-                      <p className="muted">社説を確認中…</p>
-                    ) : activeOutlet.editorial ? (
+                {activeOutlet ? (
+                  <div className="paper">
+                    <p className="paper-kicker">
+                      {activeOutlet.outletName}
+                      <time dateTime={activeOutlet.publishedAt}>
+                        {formatWhen(activeOutlet.publishedAt)}
+                      </time>
+                    </p>
+                    <h3>{activeOutlet.headline}</h3>
+                    {effectiveKind === 'editorial' ? (
                       <>
-                        <p className="paper-body">{activeOutlet.editorial}</p>
+                        <Paragraphs text={activeOutlet.editorial ?? ''} />
                         {activeOutlet.editorialUrl ? (
                           <a
                             className="paper-link"
@@ -669,56 +927,45 @@ function App() {
                           社説は版ごとではなく、この出来事全体に対するものです。
                         </p>
                       </>
+                    ) : effectiveKind === 'report' ? (
+                      <>
+                        <Paragraphs text={activeOutlet.body ?? ''} />
+                        {activeOutlet.url ? (
+                          <a
+                            className="paper-link"
+                            href={activeOutlet.url}
+                            target="_blank"
+                            rel="noreferrer"
+                          >
+                            元記事を読む
+                          </a>
+                        ) : null}
+                      </>
                     ) : (
-                      <p className="muted">社説は確認できませんでした。</p>
-                    )
-                  ) : coverageKind === 'report' ? (
-                    <>
-                      {bodyLoading && !activeOutlet.body ? (
-                        <p className="muted">本文を取得中…</p>
-                      ) : null}
-                      <p className="paper-body">
-                        {activeOutlet.body ||
-                          activeOutlet.report ||
-                          activeOutlet.summary ||
-                          '（本文の抜粋はありません）'}
-                      </p>
-                      {!activeOutlet.body ? (
-                        <p className="paper-note">
-                          本文は取得できなかったため、抜粋のみを表示しています。
-                        </p>
-                      ) : null}
-                      {activeOutlet.url ? (
-                        <a
-                          className="paper-link"
-                          href={activeOutlet.url}
-                          target="_blank"
-                          rel="noreferrer"
-                        >
-                          元記事を読む
-                        </a>
-                      ) : null}
-                    </>
-                  ) : (
-                    <>
-                      <p className="paper-body">
-                        {activeOutlet.summary || '（要約はありません）'}
-                      </p>
-                      {activeOutlet.url ? (
-                        <a
-                          className="paper-link"
-                          href={activeOutlet.url}
-                          target="_blank"
-                          rel="noreferrer"
-                        >
-                          元記事を読む
-                        </a>
-                      ) : null}
-                    </>
-                  )}
-                </div>
+                      <>
+                        <Paragraphs
+                          text={activeOutlet.summary || '（要約はありません）'}
+                        />
+                        {activeOutlet.url ? (
+                          <a
+                            className="paper-link"
+                            href={activeOutlet.url}
+                            target="_blank"
+                            rel="noreferrer"
+                          >
+                            元記事を読む
+                          </a>
+                        ) : null}
+                      </>
+                    )}
+                  </div>
+                ) : effectiveKind === 'report' && bodyLoading ? (
+                  <p className="muted">本文を取得中…</p>
+                ) : effectiveKind === 'editorial' && editorialLoading ? (
+                  <p className="muted">社説を確認中…</p>
+                ) : null}
               </>
-            ) : null}
+            )}
           </article>
         ) : null}
       </div>
