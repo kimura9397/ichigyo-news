@@ -66,7 +66,12 @@ function hasData() {
 function tabWhere(tab, category) {
   const conds = [];
   const params = [];
-  if (tab === 'important') { conds.push('c.importance_score >= ?'); params.push(IMPORTANT_THRESHOLD); }
+  if (tab === 'important') {
+    conds.push('c.importance_score >= ?'); params.push(IMPORTANT_THRESHOLD);
+    // 重要タブは各ニュース（クラスタ）につき最新版の行だけを出す（2026-11-15 ユーザー承認）。
+    // 新着・すべてタブは全バージョンを行表示する従来どおり。
+    conds.push('v.version_no = (SELECT MAX(v2.version_no) FROM versions v2 WHERE v2.cluster_id = c.id)');
+  }
   if (tab === 'new') { conds.push('v.created_at >= ?'); params.push(new Date(Date.now() - 24 * 3600000).toISOString()); }
   if (category && category !== 'すべて') {
     if (category === 'その他') conds.push("c.category = ''");
