@@ -110,6 +110,8 @@ export function openDb(path) {
   ensureColumn(db, 'articles', 'author', "TEXT NOT NULL DEFAULT ''");
   // キーワード検索/ウォッチの照合用シャドウカラム（src/normalize.mjs で正規化したテキスト）
   ensureColumn(db, 'articles', 'search_text', "TEXT NOT NULL DEFAULT ''");
+  // 本文から抽出した「要点」（src/extract.mjs、ルールベース抽出）。本文が無い記事は空
+  ensureColumn(db, 'articles', 'extract_text', "TEXT NOT NULL DEFAULT ''");
   ensureColumn(db, 'clusters', 'title_norm', "TEXT NOT NULL DEFAULT ''");
   // GoogleニュースのラッパーURLから解決した実URLのキャッシュ
   ensureColumn(db, 'articles', 'resolved_url', "TEXT NOT NULL DEFAULT ''");

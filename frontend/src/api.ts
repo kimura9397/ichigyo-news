@@ -37,6 +37,8 @@ interface RawArticle {
   /** GoogleニュースのラッパーURLから解決した実URL（あれば「元記事を読む」はこちらを優先） */
   resolved_url?: string
   summary: string
+  /** 本文から抽出した「要点」（サーバー側ルールベース抽出。本文が取れた記事のみ） */
+  extract_text?: string
   published_at: string | null
   body_text?: string
   body_fetched_at?: string | null
@@ -190,7 +192,7 @@ export function outletOf(source: string): { id: string; name: string } {
 
 /* ---------- 変換 ---------- */
 
-const IMPORTANT_THRESHOLD = 45 // server.mjs の重要タブ閾値と合わせる
+const IMPORTANT_THRESHOLD = 40 // server.mjs の重要タブ閾値と合わせる
 const NEW_WINDOW_MS = 24 * 3600 * 1000
 
 function isWithinNewWindow(iso: string): boolean {
@@ -284,7 +286,8 @@ function buildCoverages(
           headline: cleanText(a.title),
           publishedAt: a.published_at ?? '',
           report: '',
-          summary: summarize(a.summary),
+          // 要点（本文からの抽出）があればそちらを、無ければ従来の要約抜粋を表示する
+          summary: cleanText(a.extract_text ?? '') || summarize(a.summary),
           // ラッパーURLが解決できていれば実URLを「元記事を読む」のリンクにする
           url: safeUrl(a.resolved_url || a.url),
         },
@@ -452,7 +455,9 @@ function rowFromDetailVersion(
     .map((a) => a.published_at)
     .filter((p): p is string => Boolean(p))
     .sort()
-  const firstSummary = version.articles.find((a) => cleanText(a.summary))
+  const firstSummary =
+    version.articles.find((a) => cleanText(a.extract_text ?? '')) ??
+    version.articles.find((a) => cleanText(a.summary))
   const withBody = version.articles.filter((a) => (a.body_text ?? '').trim())
   return {
     id: rowId(cluster.id, version.id),
@@ -462,7 +467,9 @@ function rowFromDetailVersion(
     version: version.version_no,
     versionCreatedAt: version.created_at,
     title: version.title,
-    lead: firstSummary ? summarize(firstSummary.summary, 120) : '',
+    lead: firstSummary
+      ? summarize(cleanText(firstSummary.extract_text ?? '') || firstSummary.summary, 120)
+      : '',
     publishedAt: published[published.length - 1] ?? version.created_at,
     category: cluster.category ?? '',
     isImportant: cluster.importance_score >= IMPORTANT_THRESHOLD,

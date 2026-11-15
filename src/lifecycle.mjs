@@ -10,6 +10,7 @@
 import { filterBodyLines, extractAuthorFromText } from './body.mjs';
 import { editorialRelated, importanceFor, bigrams, filterWeakBigrams, matchScore, jaccard, strongTerms, summaryWords, refineCategory } from './collector.mjs';
 import { normalizeForSearch, buildArticleSearchText } from './normalize.mjs';
+import { extractKeyPoints } from './extract.mjs';
 
 export const RETENTION_DAYS = 7;
 export const FETCH_RUNS_KEPT = 30;
@@ -320,6 +321,24 @@ export function recomputeAllImportance(db, now = new Date()) {
   return changed;
 }
 
+/**
+ * 本文が取れている記事の「要点」（articles.extract_text）を現在の本文から再計算する。
+ * 本文の後がけ取得やノイズ除去の再フィルタで本文が変わっても、要点が追随するようにする。
+ * 値が変わった行数を返す。
+ */
+export function refreshExtracts(db) {
+  const update = db.prepare('UPDATE articles SET extract_text = ? WHERE id = ?');
+  let changed = 0;
+  for (const a of db.prepare("SELECT id, title, body_text, extract_text FROM articles WHERE body_text != ''").all()) {
+    const next = extractKeyPoints(a.title, a.body_text);
+    if (next !== a.extract_text) {
+      update.run(next, a.id);
+      changed++;
+    }
+  }
+  return changed;
+}
+
 export function runLifecycle(db, now = new Date()) {
   const foldedReads = foldOldReadEvents(db, now);
   const prunedClusters = pruneOldClusters(db, now);
@@ -328,8 +347,9 @@ export function runLifecycle(db, now = new Date()) {
   const backfilledAuthors = backfillAuthors(db);
   const splitClusters = splitOverMergedClusters(db);
   const refreshedSearchText = refreshSearchText(db);
+  const refreshedExtracts = refreshExtracts(db);
   const reevaluatedEditorials = reevaluateEditorials(db);
   const recomputedImportance = recomputeAllImportance(db, now);
   const vacuumed = vacuumIfNeeded(db);
-  return { prunedClusters, foldedReads, refilteredBodies, backfilledAuthors, splitClusters, refreshedSearchText, reevaluatedEditorials, recomputedImportance, vacuumed };
+  return { prunedClusters, foldedReads, refilteredBodies, backfilledAuthors, splitClusters, refreshedSearchText, refreshedExtracts, reevaluatedEditorials, recomputedImportance, vacuumed };
 }

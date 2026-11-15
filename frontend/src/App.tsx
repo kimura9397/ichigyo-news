@@ -1114,7 +1114,7 @@ function App() {
   // 要約は常時、報道・社説は中身がある（または取得試行中）場合だけ切替を出す
   const visibleKinds = (
     [
-      ['summary', '要約'],
+      ['summary', '要点'],
       ['report', '報道'],
       ['editorial', '社説'],
     ] as const
@@ -1137,7 +1137,7 @@ function App() {
         </div>
         <div className="masthead-side">
           <p className="masthead-note">
-            各紙の報道・要約・社説を並べ、初報を v1、続報を別行の v2 として開きます。
+            各紙の報道・要点・社説を並べ、初報を v1、続報を別行の v2 として開きます。
           </p>
           <div className="masthead-actions">
             {bgRefreshing ? (
@@ -1351,7 +1351,7 @@ function App() {
                   <section className="menu-section">
                     <h3>キーワードウォッチ</h3>
                     <p className="menu-note">
-                      登録したキーワードを含むニュースだけを、タブ行のキーワードボタンから見られます。一致は見出し・要約・取得済みの本文が対象で、表記ゆれ（漏洩／漏えい等）も吸収します。キーワードはサーバーに保存され、更新のたびにそのキーワードのニュースも自動で集めます。
+                      登録したキーワードを含むニュースだけを、タブ行のキーワードボタンから見られます。一致は見出し・要点・取得済みの本文が対象で、表記ゆれ（漏洩／漏えい等）も吸収します。キーワードはサーバーに保存され、更新のたびにそのキーワードのニュースも自動で集めます。
                     </p>
                     <form
                       className="kw-form"
@@ -1701,7 +1701,7 @@ function App() {
                 (tab === 'reporter' && reporterSel
                   ? `${reporterSel.name}記者（${outletOf(reporterSel.source).name}）の記事はまだありません。`
                   : tab === 'search' && !searchQuery
-                    ? '上の入力欄にキーワードを入れて検索してください。一致はクラスタと記事の見出し・要約が対象です。'
+                    ? '上の入力欄にキーワードを入れて検索してください。一致はクラスタと記事の見出し・要点・取得済みの本文が対象です。'
                     : tab === 'search'
                       ? `「${searchQuery}」に一致するニュースはありません。`
                       : tab === 'watch' && keywords.length === 0
@@ -2008,7 +2008,7 @@ function App() {
                     ) : (
                       <>
                         <Paragraphs
-                          text={activeOutlet.summary || '（要約はありません）'}
+                          text={activeOutlet.summary || '（要点はありません）'}
                         />
                         {activeOutlet.url ? (
                           <a

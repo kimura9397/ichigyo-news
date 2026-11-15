@@ -10,7 +10,7 @@ import { fileURLToPath } from 'node:url';
 import { openDb } from './src/db.mjs';
 import { refresh, fetchEditorials, checkTopEditorials } from './src/collector.mjs';
 import { fetchClusterBodies, fetchTopImages } from './src/body.mjs';
-import { addBookmark, removeBookmark, isBookmarked, recordRead, foldOldReadEvents, pruneOldClusters, pruneFetchRuns, refilterBodies, backfillAuthors, splitOverMergedClusters, reevaluateEditorials, refreshSearchText } from './src/lifecycle.mjs';
+import { addBookmark, removeBookmark, isBookmarked, recordRead, foldOldReadEvents, pruneOldClusters, pruneFetchRuns, refilterBodies, backfillAuthors, splitOverMergedClusters, reevaluateEditorials, refreshSearchText, refreshExtracts } from './src/lifecycle.mjs';
 import { normalizeForSearch } from './src/normalize.mjs';
 import { listKeywords, addKeyword as addKeywordToDb, removeKeyword as removeKeywordFromDb } from './src/keywords.mjs';
 
@@ -176,8 +176,8 @@ const ROWS_SELECT = `
            GROUP_CONCAT(DISTINCT a.source) AS sources,
            SUM(CASE WHEN a.body_text != '' THEN 1 ELSE 0 END) AS body_count,
            SUM(CASE WHEN a.body_text != '' THEN length(a.body_text) ELSE 0 END) AS body_chars,
-           (SELECT substr(a2.summary, 1, 120) FROM articles a2
-             WHERE a2.version_id = v.id AND a2.summary != '' ORDER BY a2.published_at LIMIT 1) AS lead,
+           (SELECT substr(COALESCE(NULLIF(a2.extract_text, ''), a2.summary), 1, 120) FROM articles a2
+             WHERE a2.version_id = v.id AND (a2.extract_text != '' OR a2.summary != '') ORDER BY a2.published_at LIMIT 1) AS lead,
            (SELECT a3.image_url FROM articles a3
              WHERE a3.version_id = v.id AND a3.image_url != ''
              ORDER BY (a3.url LIKE 'https://news.google.com/%') ASC, a3.published_at DESC LIMIT 1) AS image_url,
@@ -264,7 +264,7 @@ function apiStory(id) {
   const versions = db.prepare('SELECT * FROM versions WHERE cluster_id = ? ORDER BY version_no').all(id)
     .map((v) => ({
       ...v,
-      articles: db.prepare('SELECT source, title, url, resolved_url, summary, published_at, body_text, body_fetched_at, body_url, body_via, image_url, author FROM articles WHERE version_id = ? ORDER BY published_at').all(v.id),
+      articles: db.prepare('SELECT source, title, url, resolved_url, summary, extract_text, published_at, body_text, body_fetched_at, body_url, body_via, image_url, author FROM articles WHERE version_id = ? ORDER BY published_at').all(v.id),
     }));
   const editorials = db.prepare('SELECT paper, found, title, summary, url, checked_at FROM editorials WHERE cluster_id = ?').all(id);
   return { cluster, versions, editorials };
@@ -386,9 +386,10 @@ const server = createServer(async (req, res) => {
       const backfilledAuthors = backfillAuthors(db);
       const splitClusters = splitOverMergedClusters(db);
       const refreshedSearchText = refreshSearchText(db);
+      const refreshedExtracts = refreshExtracts(db);
       const reevaluatedEditorials = reevaluateEditorials(db);
       db.exec('VACUUM');
-      return sendJson(res, 200, { pruned_clusters: prunedClusters, folded_reads: foldedReads, refiltered_bodies: refilteredBodies, backfilled_authors: backfilledAuthors, split_clusters: splitClusters, refreshed_search_text: refreshedSearchText, reevaluated_editorials: reevaluatedEditorials, before_bytes: before, after_bytes: dbBytes() });
+      return sendJson(res, 200, { pruned_clusters: prunedClusters, folded_reads: foldedReads, refiltered_bodies: refilteredBodies, backfilled_authors: backfilledAuthors, split_clusters: splitClusters, refreshed_search_text: refreshedSearchText, refreshed_extracts: refreshedExtracts, reevaluated_editorials: reevaluatedEditorials, before_bytes: before, after_bytes: dbBytes() });
     }
     if (p === '/api/status' && req.method === 'GET') {
       const counts = db.prepare('SELECT (SELECT COUNT(*) FROM clusters) AS clusters, (SELECT COUNT(*) FROM versions) AS versions, (SELECT COUNT(*) FROM articles) AS articles').get();

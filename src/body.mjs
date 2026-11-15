@@ -18,6 +18,7 @@ import { isIP } from 'node:net';
 import { stripTags, decodeEntities, isWrapperUrl, isYahooArticleUrl, bigrams, filterWeakBigrams, matchScore } from './collector.mjs';
 import { resolveGoogleNewsUrl } from './gnews-resolve.mjs';
 import { buildArticleSearchText } from './normalize.mjs';
+import { extractKeyPoints } from './extract.mjs';
 
 const TIMEOUT_MS = 15000; // 遅い回線・重いページでも本文ダウンロードが間に合うよう余裕を持たせる
 const RETRY_MS = 24 * 3600000;
@@ -314,6 +315,8 @@ function isNoiseLine(line) {
   if (/アプリで(読む|開く|見る)|アプリをダウンロード|アプリのダウンロード/.test(t)) return true;
   if (/ログイン(して|すると|が必要|画面)/.test(t) && mid) return true;
   if (/この記事はいかがでしたか/.test(t)) return true;
+  // NHK の配信サービス案内（定型文そのままの断片だけを対象にする）
+  if (/NHK ONEはどなたでも|受信契約がお済みの世帯|契約をされていない世帯の方が利用した場合は|受信契約の詳細や/.test(t)) return true;
   // 有料ティーザーの末尾行（「続きを読む」は短い行だけを対象にする）
   if (/続きを読む/.test(t) && short) return true;
   // フッター系
@@ -512,7 +515,7 @@ export async function fetchClusterBodies(db, clusterId, { fetchImpl = fetch, res
   const targets = articles.filter(
     (a) => !a.body_text && (!a.body_fetched_at || now - new Date(a.body_fetched_at).getTime() > RETRY_MS),
   );
-  const update = db.prepare('UPDATE articles SET body_text = ?, body_fetched_at = ?, body_url = ?, body_via = ?, author = ?, search_text = ? WHERE id = ?');
+  const update = db.prepare('UPDATE articles SET body_text = ?, body_fetched_at = ?, body_url = ?, body_via = ?, author = ?, search_text = ?, extract_text = ? WHERE id = ?');
   const imgUpdate = db.prepare("UPDATE articles SET image_url = ?, image_via = 'og' WHERE id = ? AND image_url = ''");
   const imgAttempt = db.prepare('UPDATE articles SET image_fetched_at = ? WHERE id = ? AND image_fetched_at IS NULL');
   const ctx = { fetchImpl, resolveGoogle, resolveBudget: { left: MAX_RESOLUTIONS }, resolvedCount: 0 };
@@ -524,7 +527,7 @@ export async function fetchClusterBodies(db, clusterId, { fetchImpl = fetch, res
     if (best.text) got++;
     if (best.author && !a.author) authors++;
     const nowIso = new Date().toISOString();
-    update.run(best.text, nowIso, best.url, best.via, best.author || a.author || '', buildArticleSearchText(a.title, a.summary, best.text), a.id);
+    update.run(best.text, nowIso, best.url, best.via, best.author || a.author || '', buildArticleSearchText(a.title, a.summary, best.text), best.text ? extractKeyPoints(a.title, best.text) : '', a.id);
     imgAttempt.run(nowIso, a.id); // og:image の取得も試行済みとして記録する（段階3の裏取得で再試行しない）
     if (best.imageUrl) {
       let credited = false;
