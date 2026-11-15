@@ -4,6 +4,8 @@
 // - 閲覧ログの生イベントは30日で read_daily（日次集計）へ畳んで削除し、集計は無期限保持する。
 // - VACUUM は起動時には行わず、refresh 時の prune 後に空きページ率が高い場合だけ自動実行する
 //   （手動実行は /api/maintenance から）。
+// - 保存済み本文には行単位のノイズ除去フィルタを後がけする（本文ノイズ除去、2026-11-15）。
+import { filterBodyLines } from './body.mjs';
 
 export const RETENTION_DAYS = 7;
 export const FETCH_RUNS_KEPT = 30;
@@ -107,14 +109,37 @@ export function vacuumIfNeeded(db) {
   return true;
 }
 
+/* ---------- 保存済み本文へのノイズ除去の後がけ ---------- */
+
 /**
- * refresh 時に行うライフサイクル一式: 閲覧集計 → prune → fetch_runs 整理 → 自動 VACUUM 判定。
- * 戻り値: { prunedClusters, foldedReads, vacuumed }
+ * 保存済みの本文（articles.body_text）に、行単位のノイズ除去フィルタを後がけする。
+ * フィルタで内容が変わった記事だけを更新する。更新した記事数を返す。
+ */
+export function refilterBodies(db) {
+  const rows = db.prepare("SELECT id, body_text FROM articles WHERE body_text != ''").all();
+  if (!rows.length) return 0;
+  const update = db.prepare('UPDATE articles SET body_text = ? WHERE id = ?');
+  let changed = 0;
+  db.exec('BEGIN IMMEDIATE');
+  try {
+    for (const r of rows) {
+      const cleaned = filterBodyLines(r.body_text);
+      if (cleaned !== r.body_text) { update.run(cleaned, r.id); changed++; }
+    }
+    db.exec('COMMIT');
+  } catch (e) { try { db.exec('ROLLBACK'); } catch {} throw e; }
+  return changed;
+}
+
+/**
+ * refresh 時に行うライフサイクル一式: 閲覧集計 → prune → fetch_runs 整理 → 本文の後がけ → 自動 VACUUM 判定。
+ * 戻り値: { prunedClusters, foldedReads, refilteredBodies, vacuumed }
  */
 export function runLifecycle(db, now = new Date()) {
   const foldedReads = foldOldReadEvents(db, now);
   const prunedClusters = pruneOldClusters(db, now);
   pruneFetchRuns(db);
+  const refilteredBodies = refilterBodies(db);
   const vacuumed = vacuumIfNeeded(db);
-  return { prunedClusters, foldedReads, vacuumed };
+  return { prunedClusters, foldedReads, refilteredBodies, vacuumed };
 }

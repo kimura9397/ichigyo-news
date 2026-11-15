@@ -101,6 +101,120 @@ export function extractOgImage(html, baseUrl = '') {
   return fallback;
 }
 
+// ---------- 本文のノイズ除去（2026-11-15 ユーザー承認） ----------
+// 取得本文に「Xでシェア！」「メールマガジン登録！」等の定型文が混ざると読む気を削ぐため、
+// (1) 構造での除外: class/id にノイズ語を含む要素を丸ごと落とす
+// (2) 行単位のフィルタ: 段落テキストから定型の勧誘・案内・フッター行を落とす
+// の2段で除去する。実文の誤爆を避けるため、パターンは具体形に絞り、
+// 行フィルタの多くは「短い行」にだけ適用する（実文は通常長い）。
+
+/** class/id のトークン（空白・ハイフン等で分割した断片）がこの語で始まる要素はノイズとみなす。 */
+const NOISE_ATTR_TOKENS = [
+  'share', 'sns', 'social', 'newsletter', 'mailmag', 'mailmagazine', 'magazine',
+  'related', 'recommend', 'ranking', 'promo', 'advert',
+  'signup', 'follow', 'subscribe', 'subscription', 'login', 'member', 'notify', 'notification',
+];
+const VOID_TAGS = new Set(['area', 'base', 'br', 'col', 'embed', 'hr', 'img', 'input', 'link', 'meta', 'source', 'track', 'wbr']);
+
+/** タグの属性文字列（class / id）の値がノイズ語を含むか。 */
+function attrsHaveNoise(attrs) {
+  for (const m of String(attrs || '').matchAll(/\b(?:class|id)\s*=\s*(?:"([^"]*)"|'([^']*)')/gi)) {
+    const value = (m[1] ?? m[2] ?? '').toLowerCase();
+    for (const token of value.split(/[\s\-_./:]+/)) {
+      if (!token) continue;
+      if (NOISE_ATTR_TOKENS.some((w) => token === w || token.startsWith(w))) return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * class/id にノイズ語を含む要素を、対応する終了タグまで丸ごと取り除く。
+ * 記事本文のルート要素（article-body 等）はノイズ語を含まない前提だが、
+ * 万一の誤判定で全文が消える事故を避けるため、呼び出し側で安全弁を持つ。
+ */
+function stripNoiseElements(html) {
+  const tagRe = /<(\/?)([a-zA-Z][a-zA-Z0-9]*)((?:[^>"']|"[^"]*"|'[^']*')*)>/g;
+  let out = '';
+  let last = 0;
+  let m;
+  let skipTag = null; // 除去中の要素名（同名タグのネストを数える）
+  let depth = 0;
+  while ((m = tagRe.exec(html)) !== null) {
+    const isClose = m[1] === '/';
+    const name = m[2].toLowerCase();
+    const attrs = m[3] || '';
+    if (skipTag) {
+      if (name === skipTag) {
+        if (isClose) { depth--; if (depth === 0) { skipTag = null; last = tagRe.lastIndex; } }
+        else if (!VOID_TAGS.has(name) && !/\/\s*$/.test(attrs)) depth++;
+      }
+      continue;
+    }
+    if (!isClose && !VOID_TAGS.has(name) && !/\/\s*$/.test(attrs) && attrsHaveNoise(attrs)) {
+      out += html.slice(last, m.index);
+      skipTag = name;
+      depth = 1;
+      last = tagRe.lastIndex;
+    }
+  }
+  if (!skipTag) out += html.slice(last);
+  // 閉じタグが見つからず末尾まで除去してしまった場合は壊れた入力とみなし、原文を返す
+  return skipTag ? html : out;
+}
+
+/** 行がノイズ（定型の勧誘・案内・フッター）かどうか。実文を消さないよう具体形に絞る。 */
+function isNoiseLine(line) {
+  const t = line.trim();
+  if (!t) return true;
+  const short = t.length < 50;
+  const mid = t.length < 80;
+  // 見出し型の定型ブロック（行頭一致）
+  if (/^(関連記事|関連ニュース|関連リンク|おすすめ記事|おすすめの記事|あわせて読みたい|こちらもおすすめ|人気記事|人気の記事|今読まれている記事|新着記事|最新記事|編集部おすすめ|アクセスランキング|動画アクセスランキング|ランキング)/.test(t)) return true;
+  // シェア系（「市場シェア」のような実文に当たらない具体形のみ）
+  if (/(X|Ｔｗｉｔｔｅｒ|Twitter|Facebook|LINE|はてな).{0,8}(で|に|へ)?(シェア|ポスト|送る|登録|追加)/.test(t)) return true;
+  if (/(記事をシェア|シェアする$|シェアしよう)/.test(t) && t.length < 40) return true;
+  if (/^(シェア|共有する|共有|Ｓｈａｒｅ|Share)/.test(t) && short) return true;
+  if (/はてなブックマーク/.test(t)) return true;
+  // 登録・フォロー・通知系の勧誘
+  if (/(メールマガジン|メルマガ)/.test(t) && (/(登録|配信|購読|申し込|受信)/.test(t) || t.length < 30)) return true;
+  if (/(会員登録|無料登録|新規登録|読者登録)/.test(t) && mid) return true;
+  if (/フォロー(する|して|ボタン)/.test(t) && short) return true;
+  if (/通知を受け取る|通知をオン/.test(t)) return true;
+  if (/アプリで(読む|開く|見る)|アプリをダウンロード|アプリのダウンロード/.test(t)) return true;
+  if (/ログイン(して|すると|が必要|画面)/.test(t) && mid) return true;
+  if (/この記事はいかがでしたか/.test(t)) return true;
+  // 有料ティーザーの末尾行（「続きを読む」は短い行だけを対象にする）
+  if (/続きを読む/.test(t) && short) return true;
+  // フッター系
+  if (/(©|Copyright|（C）|\(c\))/.test(t) && /(無断|転載|複製|rights reserved|コピーライト)/i.test(t)) return true;
+  if (/無断(転載|複製|引用)を(禁じ|お断り)/.test(t)) return true;
+  if (/(お問い合わせ|プライバシーポリシー|プライバシー・ポリシー|利用規約|特定商取引法|サイトマップ|会社概要)/.test(t) && mid) return true;
+  // 極端に短い行のCTA（ボタン文言の残骸）
+  if (t.length < 15 && /(登録|シェア|フォロー|購入|ダウンロード|申し込|今すぐ|クリック|応募する)/.test(t)) return true;
+  return false;
+}
+
+/**
+ * 抽出済み本文テキストからノイズ行を取り除く（保存済み本文への後がけにも使う）。
+ * 段落構造（空行区切り）は保持する: 段落ブロック単位で処理し、ブロック内の
+ * ノイズ行だけを落とす。連続する重複行も落とす。判定は isNoiseLine に集約する。
+ */
+export function filterBodyLines(text) {
+  const blocks = [];
+  for (const block of String(text || '').split(/\n{2,}/)) {
+    const lines = [];
+    for (const line of block.split('\n')) {
+      const t = line.trim();
+      if (!t || isNoiseLine(t)) continue;
+      if (lines[lines.length - 1] === t) continue;
+      lines.push(t);
+    }
+    if (lines.length) blocks.push(lines.join('\n'));
+  }
+  return blocks.join('\n\n');
+}
+
 /** HTMLから本文らしき <p> テキストを連結する（ナビ・広告等の定型ブロックは除去）。 */
 export function extractBody(html) {
   let h = String(html || '');
@@ -109,14 +223,25 @@ export function extractBody(html) {
     .replace(/<style[\s\S]*?<\/style>/gi, ' ')
     .replace(/<!--[\s\S]*?-->/g, ' ')
     .replace(/<(nav|header|footer|aside|form|noscript|select|button)[\s\S]*?<\/\1>/gi, ' ');
-  const paras = [];
-  for (const m of h.matchAll(/<p[^>]*>([\s\S]*?)<\/p>/gi)) {
-    const t = stripTags(m[1]).trim();
-    if (t.length < 25) continue; // 短い断片（リンク・キャプション類）は本文とみなさない
-    if (paras[paras.length - 1] === t) continue;
-    paras.push(t);
+  const collect = (source) => {
+    const paras = [];
+    for (const m of source.matchAll(/<p\b([^>]*)>([\s\S]*?)<\/p>/gi)) {
+      if (attrsHaveNoise(m[1])) continue; // <p> 自身がノイズ要素なら拾わない
+      const t = stripTags(m[2]).trim();
+      if (t.length < 25) continue; // 短い断片（リンク・キャプション類）は本文とみなさない
+      if (paras[paras.length - 1] === t) continue;
+      paras.push(t);
+    }
+    return paras.join('\n\n'); // 段落構造を空行区切りで保持する（表示側で段落ごとに描く）
+  };
+  const stripped = stripNoiseElements(h);
+  let text = collect(stripped);
+  // 安全弁: 構造除去で本文の大半が消えた場合は誤判定とみなし、除去なしの抽出に戻す
+  if (text.length < 200) {
+    const raw = collect(h);
+    if (raw.length >= 200 && text.length < raw.length * 0.2) text = raw;
   }
-  return paras.join('\n').slice(0, 20000);
+  return filterBodyLines(text).slice(0, 20000);
 }
 
 /**
