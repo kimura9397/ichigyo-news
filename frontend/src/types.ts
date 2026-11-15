@@ -47,6 +47,8 @@ export interface StoryRow {
   detailLoaded?: boolean
   /** ブックマーク済みか（ブックマークしたニュースは保持期間の削除から免除される） */
   bookmarked?: boolean
+  /** 社説が確認できた媒体名（短い名前、紙の並び順）。社説タブの行表示用 */
+  editorialPapers?: string[]
 }
 
-export type FeedTab = 'important' | 'fresh' | 'all' | 'bookmarks'
+export type FeedTab = 'important' | 'fresh' | 'all' | 'editorials' | 'bookmarks'

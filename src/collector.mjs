@@ -565,11 +565,11 @@ return chunks.slice(0, 2).join(' ');
 * 5大紙の社説をGoogleニュースRSS検索で探す。結果は editorials にキャッシュ。
 * 見つからない紙は found=0（UIで「確認できず」と表示）。捏造はしない。
 */
-export async function fetchEditorials(db, clusterId, { fetchImpl = fetch } = {}) {
+export async function fetchEditorials(db, clusterId, { fetchImpl = fetch, force = false } = {}) {
 const cluster = db.prepare('SELECT * FROM clusters WHERE id = ?').get(clusterId);
 if (!cluster) return null;
 const cached = db.prepare('SELECT * FROM editorials WHERE cluster_id = ?').all(clusterId);
-if (cached.length >= PAPERS.length) {
+if (!force && cached.length >= PAPERS.length) {
 // 社説ボーナス（D）が重要度に反映されるよう、キャッシュ済みでも再計算だけは行う
 db.prepare('UPDATE clusters SET importance_score = ? WHERE id = ?').run(importanceFor(db, clusterId), clusterId);
 return cached;
@@ -614,6 +614,86 @@ results.push(row);
 // 社説ボーナス（D）が重要度に反映されるよう、取得後に再計算する
 db.prepare('UPDATE clusters SET importance_score = ? WHERE id = ?').run(importanceFor(db, clusterId), clusterId);
 return results;
+}
+
+// ---------- 背景社説チェック（2026-11-15 ユーザー承認） ----------
+// refresh 完了後にサーバーが裏で呼ぶ。重要タブ上位クラスタの社説を先回りで確認し、
+// 「社説」タブの中身と社説ボーナスの材料を増やす。refresh 自体はブロックしない。
+
+/** 背景チェックの候補に含める重要度の下限（server.mjs / body.mjs の重要タブ閾値と合わせる）。 */
+const EDITORIAL_BATCH_THRESHOLD = 45;
+/** 再チェックの間隔: 社説はニュースの翌朝に出ることが多いため、丸1日空けたら拾い直す。 */
+const EDITORIAL_RECHECK_MS = 24 * 3600000;
+/** 再チェックの対象は発生から3日以内のクラスタまで（それより古い話題に社説はほぼ付かない）。 */
+const EDITORIAL_RECHECK_WINDOW_MS = 3 * 24 * 3600000;
+
+/**
+ * 背景社説チェックの候補クラスタを優先順に返す。
+ * 並びは重要タブと同じ考え方（時間減衰込みの順位）で上位 limit 件を母集団にし、
+ * 未チェック（全紙分の行が無い）を先に、次に再チェック対象を並べる。
+ * 再チェック対象: 全紙チェック済みで、最終チェックから24時間超、かつ first_seen から3日以内。
+ * 戻り値: [{ id, force }]（force=true はキャッシュを無視して再検索する）。
+ */
+export function editorialCheckCandidates(db, { now = new Date(), limit = 50 } = {}) {
+  const ranked = db.prepare(`
+    SELECT c.id, c.first_seen_at,
+      (c.importance_score + MIN(COALESCE(b.body_chars, 0) / 2000.0, 5))
+        / POWER(MAX((julianday(?) - julianday(COALESCE(b.latest_published, c.last_seen_at))) * 24.0, 0) + 2, 1.2) AS rank_score
+    FROM clusters c
+    LEFT JOIN (
+      SELECT cluster_id, MAX(published_at) AS latest_published,
+             SUM(CASE WHEN body_text != '' THEN length(body_text) ELSE 0 END) AS body_chars
+      FROM articles GROUP BY cluster_id
+    ) b ON b.cluster_id = c.id
+    WHERE c.importance_score >= ?
+    ORDER BY rank_score DESC
+    LIMIT ?`).all(now.toISOString(), EDITORIAL_BATCH_THRESHOLD, limit);
+  const stateStmt = db.prepare('SELECT COUNT(*) AS rows, MAX(checked_at) AS last_checked FROM editorials WHERE cluster_id = ?');
+  const nowMs = now.getTime();
+  const out = [];
+  for (const c of ranked) {
+    const st = stateStmt.get(c.id);
+    if (!st || st.rows < PAPERS.length) {
+      out.push({ id: c.id, force: false, rank: out.length });
+    } else if (
+      st.last_checked &&
+      nowMs - new Date(st.last_checked).getTime() > EDITORIAL_RECHECK_MS &&
+      nowMs - new Date(c.first_seen_at).getTime() < EDITORIAL_RECHECK_WINDOW_MS
+    ) {
+      out.push({ id: c.id, force: true, rank: out.length });
+    }
+  }
+  // 未チェックを先に（母集団内の順位は維持）、再チェックは後ろ
+  return [
+    ...out.filter((x) => !x.force),
+    ...out.filter((x) => x.force),
+  ].map(({ id, force }) => ({ id, force }));
+}
+
+/**
+ * 背景社説チェック本体: 候補から最大 maxChecks 件を並列 parallel で確認する。
+ * チェック完了時の重要度再計算は fetchEditorials 内の配線（社説ボーナス）が担う。
+ * 戻り値: { candidates, checked }。
+ */
+export async function checkTopEditorials(db, { fetchImpl = fetch, now = new Date(), candidateLimit = 50, maxChecks = 20, parallel = 2 } = {}) {
+  const candidates = editorialCheckCandidates(db, { now, limit: candidateLimit });
+  const targets = candidates.slice(0, maxChecks);
+  let i = 0;
+  let checked = 0;
+  await Promise.all(
+    Array.from({ length: Math.min(parallel, targets.length) }, async () => {
+      while (i < targets.length) {
+        const t = targets[i++];
+        try {
+          await fetchEditorials(db, t.id, { fetchImpl, force: t.force });
+          checked++;
+        } catch (e) {
+          console.error('editorial batch failed for cluster', t.id, e);
+        }
+      }
+    }),
+  );
+  return { candidates: candidates.length, checked };
 }
 
 /** 社説の関連判定で除外する汎用語（どの話題にも出てくる語）。 */

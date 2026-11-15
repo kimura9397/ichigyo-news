@@ -20,6 +20,7 @@ const TABS: { id: FeedTab; label: string; hint: string }[] = [
   { id: 'important', label: '重要', hint: '社会的影響が大きい出来事' },
   { id: 'fresh', label: '新着', hint: '直近で入った初報と続報' },
   { id: 'all', label: 'すべて', hint: '版を含む全行' },
+  { id: 'editorials', label: '社説', hint: '社説が確認できたニュース' },
   { id: 'bookmarks', label: 'ブックマーク', hint: '保存したニュース' },
 ]
 
@@ -781,6 +782,14 @@ function App() {
                             <span>
                               {story.coverages.length}紙
                               {story.version === 1 ? ' · 初報' : ' · 続報'}
+                              {tab === 'editorials' &&
+                              story.editorialPapers &&
+                              story.editorialPapers.length > 0 ? (
+                                <span className="editorial-papers">
+                                  {' · 社説 '}
+                                  {story.editorialPapers.join('・')}
+                                </span>
+                              ) : null}
                             </span>
                             <span className="badges">
                               {(story.bodyCount ?? 0) > 0 ? (

@@ -24,6 +24,8 @@ interface RawStoryRow {
   body_count: number | null
   body_chars: number | null
   image_url: string | null
+  /** 社説が確認できた媒体名（カンマ区切り、紙の並び順）。無ければ null */
+  editorial_papers?: string | null
 }
 
 interface RawArticle {
@@ -387,6 +389,9 @@ function rowFromListItem(item: RawStoryRow): StoryRow {
     imageUrl: safeUrl(item.image_url) || undefined,
     bodyCount: item.body_count ?? 0,
     bodyChars: item.body_chars ?? 0,
+    editorialPapers: item.editorial_papers
+      ? item.editorial_papers.split(',').filter(Boolean)
+      : undefined,
     coverages,
   }
 }

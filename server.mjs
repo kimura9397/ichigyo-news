@@ -8,7 +8,7 @@ import { statSync } from 'node:fs';
 import { extname, join, dirname, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { openDb } from './src/db.mjs';
-import { refresh, fetchEditorials } from './src/collector.mjs';
+import { refresh, fetchEditorials, checkTopEditorials } from './src/collector.mjs';
 import { fetchClusterBodies, fetchTopImages } from './src/body.mjs';
 import { addBookmark, removeBookmark, isBookmarked, recordRead, foldOldReadEvents, pruneOldClusters, pruneFetchRuns, refilterBodies } from './src/lifecycle.mjs';
 
@@ -31,11 +31,21 @@ let refreshing = null;
 function doRefresh() {
   if (!refreshing) {
     refreshing = refresh(db)
-      .then((r) => { kickImageBatch(); return r; })
+      .then((r) => { kickImageBatch(); kickEditorialBatch(); return r; })
       .catch((e) => { console.error('refresh failed:', e); return null; })
       .finally(() => { refreshing = null; });
   }
   return refreshing;
+}
+
+// 背景社説チェック: refresh 完了後、重要タブ上位クラスタの社説を裏で確認する（refresh はブロックしない）
+let editorialBatchRunning = false;
+function kickEditorialBatch() {
+  if (editorialBatchRunning) return;
+  editorialBatchRunning = true;
+  checkTopEditorials(db)
+    .catch((e) => { console.error('editorial batch failed:', e); })
+    .finally(() => { editorialBatchRunning = false; });
 }
 
 // 段階3: refresh 完了後、重要タブ上位クラスタの og:image を裏で取得する（refresh はブロックしない）
@@ -84,6 +94,11 @@ function tabWhere(tab, category) {
     conds.push('EXISTS (SELECT 1 FROM bookmarks b WHERE b.cluster_id = c.id)');
     conds.push('v.version_no = (SELECT MAX(v2.version_no) FROM versions v2 WHERE v2.cluster_id = c.id)');
   }
+  if (tab === 'editorials') {
+    // 社説タブ: 社説が1件以上確認できた（found=1）クラスタだけを、各クラスタ最新版の行で出す
+    conds.push('EXISTS (SELECT 1 FROM editorials e WHERE e.cluster_id = c.id AND e.found = 1)');
+    conds.push('v.version_no = (SELECT MAX(v2.version_no) FROM versions v2 WHERE v2.cluster_id = c.id)');
+  }
   if (tab === 'new') { conds.push('v.created_at >= ?'); params.push(new Date(Date.now() - 24 * 3600000).toISOString()); }
   if (category && category !== 'すべて') {
     if (category === 'その他') conds.push("c.category = ''");
@@ -95,7 +110,7 @@ function tabWhere(tab, category) {
 function tabOrder(tab) {
   // 同一クラスタ内は常に version_no 降順（最新版が先）
   // 重要タブは Hacker News 式の時間減衰を掛け、古い高スコア行が居座らないようにする（本文ブースト込み）
-  if (tab === 'important') return `((c.importance_score + MIN(COALESCE(body_chars, 0) / 2000.0, 5)) / POWER(MAX((julianday('now') - julianday(COALESCE(latest_published, v.created_at))) * 24.0, 0) + 2, 1.2)) DESC, latest_published DESC, v.version_no DESC`;
+  if (tab === 'important' || tab === 'editorials') return `((c.importance_score + MIN(COALESCE(body_chars, 0) / 2000.0, 5)) / POWER(MAX((julianday('now') - julianday(COALESCE(latest_published, v.created_at))) * 24.0, 0) + 2, 1.2)) DESC, latest_published DESC, v.version_no DESC`;
   if (tab === 'bookmarks') return '(SELECT b.created_at FROM bookmarks b WHERE b.cluster_id = c.id) DESC, v.version_no DESC';
   if (tab === 'new') return 'v.created_at DESC, v.version_no DESC';
   return 'c.last_seen_at DESC, v.version_no DESC';
@@ -114,7 +129,11 @@ const ROWS_SELECT = `
              WHERE a2.version_id = v.id AND a2.summary != '' ORDER BY a2.published_at LIMIT 1) AS lead,
            (SELECT a3.image_url FROM articles a3
              WHERE a3.version_id = v.id AND a3.image_url != ''
-             ORDER BY (a3.url LIKE 'https://news.google.com/%') ASC, a3.published_at DESC LIMIT 1) AS image_url
+             ORDER BY (a3.url LIKE 'https://news.google.com/%') ASC, a3.published_at DESC LIMIT 1) AS image_url,
+           (SELECT GROUP_CONCAT(e.paper) FROM (
+              SELECT paper FROM editorials WHERE cluster_id = c.id AND found = 1
+              ORDER BY CASE paper WHEN '朝日' THEN 1 WHEN '毎日' THEN 2 WHEN '読売' THEN 3 WHEN '産経' THEN 4 WHEN '日経' THEN 5 ELSE 6 END
+            ) e) AS editorial_papers
     FROM versions v
     JOIN clusters c ON c.id = v.cluster_id
     JOIN articles a ON a.version_id = v.id`;
@@ -153,7 +172,7 @@ async function apiStories(url) {
     kicked = kickRefreshIfStale();
   }
   const tabParam = url.searchParams.get('tab') || 'all';
-  const tab = ['important', 'new', 'all', 'bookmarks'].includes(tabParam) ? tabParam : 'all';
+  const tab = ['important', 'new', 'all', 'bookmarks', 'editorials'].includes(tabParam) ? tabParam : 'all';
   const catParam = url.searchParams.get('category') || 'すべて';
   const category = ['すべて', ...CATEGORIES].includes(catParam) ? catParam : 'すべて';
   const limit = Math.min(500, Math.max(1, Number.parseInt(url.searchParams.get('limit') || '100', 10) || 100));
