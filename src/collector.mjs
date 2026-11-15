@@ -337,10 +337,27 @@ export const SPORTS_KEYWORDS = [
 'セーリング', 'アーチェリー', 'ウエイトリフティング', 'テコンドー', 'サーフィン',
 'スケートボード', 'スポーツクライミング', 'モータースポーツ',
 ];
+/** 外交・国際会議の明確な語。文化・エンタメ等に誤って届いた場合の補正にだけ使う。 */
+export const DIPLOMACY_KEYWORDS = [
+'首脳会議', 'サミット', '外相会談', '外相会議', '国連総会', '国連安保理', 'ASEAN', 'アセアン', 'APEC', 'G7', 'G20', 'Ｇ７', 'Ｇ２０',
+];
+/** 「スポーツ」が複合語の一部でしかない見出し（競技そのものではない）。 */
+const SPORTS_COMPOUND_RE = /スポーツカー|スポーツバイク|スポーツセダン|スポーツモデル/;
+const COMMERCE_RE = /値引き|相場|新車|中古車|販売|価格|受注|発売/;
+
 export function refineCategory(title, category) {
 const t = String(title || '');
 for (const kw of SPORTS_KEYWORDS) if (t.includes(kw)) return 'スポーツ';
-return category || '';
+let cat = category || '';
+// 「スポーツ」分類でも、見出しの証拠がスポーツカー等の複合語だけなら競技ニュースではない
+if (cat === 'スポーツ' && SPORTS_COMPOUND_RE.test(t)) {
+return COMMERCE_RE.test(t) ? '経済' : '';
+}
+// 外交の明確な語があるのに文化・エンタメ/空欄で届いたら国際に補正する（政治・経済等の妥当な分類は触らない）
+if ((cat === '文化・エンタメ' || cat === '') && DIPLOMACY_KEYWORDS.some((kw) => t.includes(kw))) {
+return '国際';
+}
+return cat;
 }
 
 /** 配信記事の署名: クラスタリングと同じ正規化をかけたタイトル。タイトルが空なら要約冒頭で代用する。 */

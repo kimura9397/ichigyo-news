@@ -379,7 +379,8 @@ export function applyEditorials(
   })
 }
 
-function rowFromListItem(item: RawStoryRow): StoryRow {
+/** 一覧APIの生行→StoryRow 変換（純粋関数。テストからも使うため公開する）。 */
+export function rowFromListItem(item: RawStoryRow): StoryRow {
   const seen = new Set<string>()
   const coverages: OutletCoverage[] = []
   for (const src of (item.sources ?? '').split(',')) {

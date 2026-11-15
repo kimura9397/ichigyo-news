@@ -12,6 +12,25 @@ import { splitOverMergedClusters } from '../src/lifecycle.mjs';
 const clusterOf = (db, url) => db.prepare('SELECT cluster_id FROM articles WHERE url = ?').get(url)?.cluster_id;
 const clusterCount = (db) => db.prepare('SELECT COUNT(*) c FROM clusters').get().c;
 
+test('実例の統合再現: 首相動静・熊本地震基金・福井共生フォーラム・放送案内は1クラスタに合体しない', () => {
+  // 2026-11-15 ユーザー実機のメガクラスタ（11/9〜11/15に吸い込み続けた）の素材を時系列で入れる
+  const db = openDb(':memory:');
+  const items = [
+    { title: '高市首相動静 2026年11月6日～8日', url: 'https://example.com/x1', source: 'NHK', summary: '高市首相の動静。', publishedAt: '2026-11-09T01:00:00.000Z', at: '2026-11-09T02:00:00.000Z' },
+    { title: '熊本地震の復興基金に520億円 高市首相が表明', url: 'https://example.com/x2', source: 'NHK', summary: '高市首相は熊本地震の復興基金に520億円を表明した。', publishedAt: '2026-11-13T01:00:00.000Z', at: '2026-11-13T02:00:00.000Z' },
+    { title: '外国人との共生社会を考える 福井市でフォーラム', url: 'https://example.com/x3', source: '日テレNEWS', summary: '福井市で外国人との共生社会を考えるフォーラムが開かれた。', publishedAt: '2026-11-14T01:00:00.000Z', at: '2026-11-14T02:00:00.000Z' },
+    { title: '大分国際車いすマラソン 選手が力走', url: 'https://example.com/x4', source: 'NHK', summary: '大分市で国際車いすマラソンが開かれた。', publishedAt: '2026-11-15T01:00:00.000Z', at: '2026-11-15T02:00:00.000Z' },
+  ];
+  for (const it of items) ingestArticles(db, [it], new Date(it.at));
+  const clusters = new Set(items.map((it) => clusterOf(db, it.url)));
+  assert.equal(clusters.size, 4, '4件とも別クラスタになる');
+  // 放送案内のようなゴミは取り込まれない
+  const junk = { title: '日本取引所グループ 放送・配信のご案内 ~!@', url: 'https://example.com/x5', source: '日本取引所グループ', summary: '地上波放送と配信の案内ページ。', publishedAt: '2026-11-15T01:00:00.000Z' };
+  assert.equal(isGarbageItem(junk), true);
+  ingestArticles(db, [junk], new Date('2026-11-15T03:00:00.000Z'));
+  assert.equal(clusterOf(db, junk.url), undefined, 'ゴミは取り込まれない');
+});
+
 test('連鎖統合の防止: クラスタ内の1記事とだけ強く一致する別ニュースは合体しない', () => {
   const db = openDb(':memory:');
   const now = new Date('2026-11-15T05:00:00.000Z');
