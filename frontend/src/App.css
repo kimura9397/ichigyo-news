@@ -950,7 +950,7 @@
 
 /* 既読を薄く表示する設定が ON のとき、詳細を開いたクラスタの行を薄くする */
 .row.is-read {
-  opacity: 0.52;
+  opacity: 0.62;
 }
 
 .menu-wrap {

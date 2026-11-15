@@ -1,8 +1,11 @@
+/* パレットのコントラストは test/theme-contrast.test.mjs で検証している
+   （通常テキスト 4.5:1 以上、境界線などの UI 要素 3:1 以上、WCAG AA 相当）。
+   値を変えるときはテストが落ちない範囲で。 */
 :root {
   --ink: #1c1712;
-  --muted: #6d645a;
+  --muted: #665d50;
   --paper: #f4eee3;
-  --line: #d8cfc2;
+  --line: #8f8069;
   --vermillion: #b13224;
   --fresh: #1f6f64;
   --shadow: 0 10px 30px color-mix(in srgb, var(--ink) 8%, transparent);
@@ -68,8 +71,8 @@ button:focus-visible {
   --ink: #ece4d4;
   --muted: #a89b87;
   --paper: #262019;
-  --line: #4a4136;
-  --vermillion: #e0685a;
+  --line: #77694f;
+  --vermillion: #ec8474;
   --fresh: #4cb3a5;
   --shadow: 0 10px 30px rgb(0 0 0 / 0.45);
   --tint-base: #2e2822;
