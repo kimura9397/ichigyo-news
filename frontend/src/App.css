@@ -6,16 +6,17 @@
 
 .masthead {
   display: flex;
+  flex-wrap: wrap;
   justify-content: space-between;
   gap: 24px;
-  align-items: end;
-  padding: 28px 32px 20px;
+  align-items: center;
+  padding: 16px 32px 12px;
   border-bottom: 3px solid var(--ink);
 }
 
 .brand-kicker {
-  margin: 0 0 4px;
-  font-size: 12px;
+  margin: 0 0 2px;
+  font-size: 11px;
   letter-spacing: 0.18em;
   color: var(--muted);
 }
@@ -23,7 +24,7 @@
 .brand h1 {
   margin: 0;
   font-family: var(--serif);
-  font-size: 42px;
+  font-size: 34px;
   font-weight: 700;
   letter-spacing: 0.12em;
   line-height: 1;
@@ -31,8 +32,8 @@
 
 .masthead-note {
   margin: 0;
-  max-width: 28rem;
-  font-size: 13px;
+  max-width: 19rem;
+  font-size: 12px;
   color: var(--muted);
   text-align: end;
 }
@@ -402,11 +403,13 @@
   .masthead {
     flex-direction: column;
     align-items: start;
-    padding: 20px 16px 16px;
+    gap: 12px;
+    padding: 14px 16px 12px;
   }
 
   .masthead-note {
     text-align: start;
+    max-width: none;
   }
 
   /* 狭幅は一覧と詳細を横に並べた全画面ページャー（スワイプで左右を行き来）。
@@ -457,11 +460,13 @@
 
 /* --- 実API連携に伴う最小限の追加 --- */
 
+/* 説明文と操作群は縦に積まず横に並べ、マストヘッドの縦幅を抑える */
 .masthead-side {
   display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  gap: 10px;
+  flex-direction: row;
+  align-items: center;
+  gap: 20px;
+  min-width: 0;
 }
 
 /* --- マストヘッドのユーティリティ群（アイコンボタン＋スイッチ＋セグメント） --- */
@@ -734,7 +739,9 @@
 
 @media (max-width: 860px) {
   .masthead-side {
+    flex-direction: column;
     align-items: flex-start;
+    gap: 8px;
   }
 }
 
