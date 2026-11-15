@@ -30,7 +30,7 @@ function dbBytes() {
 }
 
 const CATEGORIES = ['社会', '政治', '経済', '国際', 'スポーツ', '文化・エンタメ', '科学', 'その他'];
-const IMPORTANT_THRESHOLD = 45; // 重要度スコアv2（2026-11-15再設計）の分布に合わせて再設定（対象が上位約60クラスタになる値）
+const IMPORTANT_THRESHOLD = 40; // 重要度スコアv3（直近24時間の活動のみ）の実DB分布で再設定（2026-11-15計測: 40以上が31クラスタ）
 
 let refreshing = null;
 function doRefresh() {
@@ -158,8 +158,9 @@ function tabWhere(tab, category, muted = [], keywords = [], reporter = null) {
 
 function tabOrder(tab) {
   // 同一クラスタ内は常に version_no 降順（最新版が先）
-  // 重要タブは Hacker News 式の時間減衰を掛け、古い高スコア行が居座らないようにする（本文ブースト込み）
-  if (tab === 'important' || tab === 'editorials') return `((c.importance_score + MIN(COALESCE(body_chars, 0) / 2000.0, 5)) / POWER(MAX((julianday('now') - julianday(COALESCE(latest_published, v.created_at))) * 24.0, 0) + 2, 1.2)) DESC, latest_published DESC, v.version_no DESC`;
+  // 重要度スコア自体が「直近24時間の活動」だけで計算される（importanceFor v3）ため、
+  // ここで時間減衰を掛けると二重適用になる。並びはスコア＋本文ブーストのみ。
+  if (tab === 'important' || tab === 'editorials') return `(c.importance_score + MIN(COALESCE(body_chars, 0) / 2000.0, 5)) DESC, latest_published DESC, v.version_no DESC`;
   if (tab === 'bookmarks') return '(SELECT b.created_at FROM bookmarks b WHERE b.cluster_id = c.id) DESC, v.version_no DESC';
   if (tab === 'new') return 'v.created_at DESC, v.version_no DESC';
   return 'c.last_seen_at DESC, v.version_no DESC';

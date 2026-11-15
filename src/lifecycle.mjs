@@ -294,6 +294,32 @@ export function refreshSearchText(db) {
   return updated;
 }
 
+/**
+ * 全クラスタの重要度を現在時刻で再計算する。重要度は「直近24時間の活動」だけで
+ * 決まる（importanceFor v3）ため、時間の経過だけでもスコアは変わる。新規取り込みの
+ * 無かったクラスタも含めて揃えないと、古い高スコアが重要タブに居座ってしまう。
+ * 値が変わったクラスタ数を返す。
+ */
+export function recomputeAllImportance(db, now = new Date()) {
+  const update = db.prepare('UPDATE clusters SET importance_score = ? WHERE id = ?');
+  // 再計算が要るのは「窓内に活動がある」か「前回のスコアが残っている」クラスタだけ。
+  // どちらでもないクラスタは定義上スコア0のままで、毎回計算し直す必要はない。
+  const windowStart = new Date(now.getTime() - 24 * 3600000).toISOString();
+  const targets = db.prepare(`
+    SELECT id, importance_score FROM clusters
+    WHERE importance_score > 0
+       OR id IN (SELECT cluster_id FROM articles WHERE julianday(COALESCE(published_at, fetched_at)) >= julianday(?))`).all(windowStart);
+  let changed = 0;
+  for (const c of targets) {
+    const next = importanceFor(db, c.id, now);
+    if (Math.abs(next - c.importance_score) > 0.001) {
+      update.run(next, c.id);
+      changed++;
+    }
+  }
+  return changed;
+}
+
 export function runLifecycle(db, now = new Date()) {
   const foldedReads = foldOldReadEvents(db, now);
   const prunedClusters = pruneOldClusters(db, now);
@@ -303,6 +329,7 @@ export function runLifecycle(db, now = new Date()) {
   const splitClusters = splitOverMergedClusters(db);
   const refreshedSearchText = refreshSearchText(db);
   const reevaluatedEditorials = reevaluateEditorials(db);
+  const recomputedImportance = recomputeAllImportance(db, now);
   const vacuumed = vacuumIfNeeded(db);
-  return { prunedClusters, foldedReads, refilteredBodies, backfilledAuthors, splitClusters, refreshedSearchText, reevaluatedEditorials, vacuumed };
+  return { prunedClusters, foldedReads, refilteredBodies, backfilledAuthors, splitClusters, refreshedSearchText, reevaluatedEditorials, recomputedImportance, vacuumed };
 }

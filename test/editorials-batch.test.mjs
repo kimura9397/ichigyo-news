@@ -1,5 +1,5 @@
 // 背景社説チェック（2026-11-15 ユーザー承認）の検証。
-// - 候補選定: 重要タブ上位（スコア45以上）のうち未チェックを優先し、
+// - 候補選定: 重要タブ上位（スコア40以上）のうち未チェックを優先し、
 //   「最終チェックから24時間超」かつ「first_seen から3日以内」のチェック済みを再チェック対象にする。
 // - バッチ実行: 1回あたり最大20件・並列2で fetchEditorials を回し、
 //   完了時に重要度スコアが再計算される（社説ボーナスの配線）。
@@ -39,7 +39,7 @@ const emptyFetch = async () => ({
 test('候補選定: 未チェックのみ・再チェック条件（24時間超かつ3日以内）・スコア下限', () => {
   const db = openDb(':memory:');
   const unchecked = makeCluster(db);
-  const lowScore = makeCluster(db, { score: 44 });
+  const lowScore = makeCluster(db, { score: 39 });
   const checkedRecent = makeCluster(db);
   markChecked(db, checkedRecent, hoursAgo(1));
   const recheck = makeCluster(db, { firstSeenH: 24 });
@@ -52,7 +52,7 @@ test('候補選定: 未チェックのみ・再チェック条件（24時間超�
   const cands = editorialCheckCandidates(db, { now: NOW });
   const byId = new Map(cands.map((c) => [c.id, c.force]));
   assert.equal(byId.get(unchecked), false, '未チェックは force=false で候補になる');
-  assert.equal(byId.has(lowScore), false, 'スコア45未満は候補外');
+  assert.equal(byId.has(lowScore), false, 'スコア下限（40）未満は候補外');
   assert.equal(byId.has(checkedRecent), false, 'チェック直後は候補外');
   assert.equal(byId.get(recheck), true, '24時間超＋発生3日以内は force=true で再チェック');
   assert.equal(byId.has(tooOldTopic), false, '発生から3日を超えたら再チェックしない');

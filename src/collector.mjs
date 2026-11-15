@@ -350,29 +350,34 @@ return normalizeForMatch(base);
 }
 
 /**
-* 重要度スコア v2（2026-11-15 再設計）。
-* v1（同日先行改善）の式は署名グループごとの重み合計が主成分で、言い換え見出しの多い
-* 大型クラスタほど重みが積み上がり膨張した（例: 接続障害クラスタ 124→285）。
-* v2 は「主要媒体が独自に報じているか」を軸にし、各成分に上限と圧縮を入れて暴走を防ぐ。
-* - 主要媒体成分: 署名グループのうち、最大重みの媒体が主要媒体（重み3）のグループだけを
-*      本計算に入れる。その重み合計 W に log 圧縮 10 × log2(1 + W) を掛ける。
-* - 広がり成分: それ以外の媒体（重み1）のグループは +0.5/グループ、上限 +5。
-*      アグリゲータのみのグループ（重み0）はどちらの成分にも入れない。
-* - グループ数成分: 署名グループ総数に上限を付け min(G, 20) × 0.8。
-* - バージョン成分: min(版数, 5) × 2（続報の積み上がりにも上限）。
-* - 新しさボーナス: 最新記事が6時間以内 +5 / 24時間以内 +2（従来どおり）。
-* - A: カテゴリがスポーツ / 文化・エンタメのクラスタは、社説ボーナスを除いた
-*      小計に ×0.7 の減衰を掛ける。カテゴリは refineCategory で補正済みの前提。
-* - D: 社説が found で確認できた媒体1つにつき +6（上限 +18）。各紙が社説で
-*      取り上げたニュースは「重要」と判断された証拠とみなす。
+* 重要度スコア v3（2026-11-15 ユーザー定義による再設計）。
+* 定義: 重要度とは「直近24時間で、新聞の1面・2面に載る水準の話か」。
+* そのため材料は直近24時間の活動だけで計算し、それ以前の蓄積では膨らませない
+* （v2 は全期間の記事・版を数えたため、数日かけて育っただけの話題が上位に居座った。
+*  例: 車いすマラソンが重要度3位になるのはおかしい、というユーザー指摘）。
+* - 対象記事: 公開時刻（無ければ取得時刻）が直近24時間以内の記事だけ。
+*   窓内に記事が1件も無ければスコアは 0（重要タブには出ない）。
+* - バージョン成分: 直近24時間に作られた版の数で数える min(版数, 5) × 2。
+* - 主要媒体成分・広がり成分・グループ数成分・カテゴリ減衰（×0.7）は v2 のまま、
+*   ただし窓内の記事だけで計算する。
+* - 新しさボーナス（v2 の +5/+2）と一覧側の時間減衰（HN式）は廃止する。
+*   24時間窓そのものが新しさの条件であり、二重に効かせないため。
+* - D: 社説ボーナスは維持する（found 1媒体 +6、上限 +18）。社説は翌朝に出ることが
+*   多いが、窓内の活動がある話にだけボーナスが効く形にした（窓内に記事が無ければ
+*   社説があっても 0）。翌朝の社説時点で続報・反応記事が出ているのが通常で、
+*   その場合は窓内の活動として数えられる。完全に続報の無い話＋24時間超の社説だけが
+*   落ちるが、それは「24時間で測る」という定義どおりの割り切りとする。
 */
-export function importanceFor(db, clusterId) {
+export function importanceFor(db, clusterId, now = new Date()) {
 const cluster = db.prepare('SELECT category FROM clusters WHERE id = ?').get(clusterId);
-const row = db.prepare(`
-SELECT (SELECT COUNT(*) FROM versions WHERE cluster_id = ?) AS versions,
-MAX(published_at) AS latest
-FROM articles WHERE cluster_id = ?`).get(clusterId, clusterId);
-const articles = db.prepare('SELECT source, title, summary FROM articles WHERE cluster_id = ?').all(clusterId);
+const windowStart = new Date(now.getTime() - 24 * 3600000).toISOString();
+const articles = db.prepare(`
+SELECT source, title, summary FROM articles
+WHERE cluster_id = ? AND julianday(COALESCE(published_at, fetched_at)) >= julianday(?)`).all(clusterId, windowStart);
+if (articles.length === 0) return 0;
+const versionCount = db.prepare(`
+SELECT COUNT(*) AS c FROM versions
+WHERE cluster_id = ? AND julianday(created_at) >= julianday(?)`).get(clusterId, windowStart).c;
 // 署名グループごとに最大の媒体重みを保持する（配信の複製は1グループに畳む）
 const groupMaxWeight = new Map();
 for (const a of articles) {
@@ -389,16 +394,12 @@ else if (w === 1) otherGroups++;
 let score = 10 * Math.log2(1 + majorWeight)
 + Math.min(otherGroups * 0.5, 5)
 + Math.min(groupMaxWeight.size, 20) * 0.8
-+ Math.min(row.versions, 5) * 2;
-if (row.latest) {
-const ageH = (Date.now() - new Date(row.latest).getTime()) / 3600000;
-if (ageH <= 6) score += 5; else if (ageH <= 24) score += 2;
-}
++ Math.min(versionCount, 5) * 2;
 // A: カテゴリ減衰（弱め）。社説ボーナスは減衰の対象外なので、この後に加える
 if (cluster && (cluster.category === 'スポーツ' || cluster.category === '文化・エンタメ')) {
 score *= 0.7;
 }
-// D: 社説ボーナス
+// D: 社説ボーナス（窓内の活動がある場合にのみここへ到達する）
 const editorialCount = db.prepare('SELECT COUNT(*) AS c FROM editorials WHERE cluster_id = ? AND found = 1').get(clusterId).c;
 score += Math.min(editorialCount * 6, 18);
 return score;
@@ -706,8 +707,8 @@ return results;
 // refresh 完了後にサーバーが裏で呼ぶ。重要タブ上位クラスタの社説を先回りで確認し、
 // 「社説」タブの中身と社説ボーナスの材料を増やす。refresh 自体はブロックしない。
 
-/** 背景チェックの候補に含める重要度の下限（server.mjs / body.mjs の重要タブ閾値と合わせる）。 */
-const EDITORIAL_BATCH_THRESHOLD = 45;
+/** 背景チェックの候補に含める重要度の下限（server.mjs の重要タブ閾値と合わせる）。 */
+const EDITORIAL_BATCH_THRESHOLD = 40;
 /** 再チェックの間隔: 社説はニュースの翌朝に出ることが多いため、丸1日空けたら拾い直す。 */
 const EDITORIAL_RECHECK_MS = 24 * 3600000;
 /** 再チェックの対象は発生から3日以内のクラスタまで（それより古い話題に社説はほぼ付かない）。 */
@@ -723,8 +724,7 @@ const EDITORIAL_RECHECK_WINDOW_MS = 3 * 24 * 3600000;
 export function editorialCheckCandidates(db, { now = new Date(), limit = 50 } = {}) {
   const ranked = db.prepare(`
     SELECT c.id, c.first_seen_at,
-      (c.importance_score + MIN(COALESCE(b.body_chars, 0) / 2000.0, 5))
-        / POWER(MAX((julianday(?) - julianday(COALESCE(b.latest_published, c.last_seen_at))) * 24.0, 0) + 2, 1.2) AS rank_score
+      (c.importance_score + MIN(COALESCE(b.body_chars, 0) / 2000.0, 5)) AS rank_score
     FROM clusters c
     LEFT JOIN (
       SELECT cluster_id, MAX(published_at) AS latest_published,
@@ -733,7 +733,7 @@ export function editorialCheckCandidates(db, { now = new Date(), limit = 50 } = 
     ) b ON b.cluster_id = c.id
     WHERE c.importance_score >= ?
     ORDER BY rank_score DESC
-    LIMIT ?`).all(now.toISOString(), EDITORIAL_BATCH_THRESHOLD, limit);
+    LIMIT ?`).all(EDITORIAL_BATCH_THRESHOLD, limit);
   const stateStmt = db.prepare('SELECT COUNT(*) AS rows, MAX(checked_at) AS last_checked FROM editorials WHERE cluster_id = ?');
   const nowMs = now.getTime();
   const out = [];

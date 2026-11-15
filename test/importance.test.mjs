@@ -1,4 +1,6 @@
-// 重要度スコア v2（2026-11-15 再設計）の検証。
+// 重要度スコアの検証。成分の設計は v2（2026-11-15）、v3 で「直近24時間の活動だけを
+// 材料にする」窓化と新しさボーナスの廃止が入った（窓の検証は importance-24h.test.mjs）。
+// このファイルのフィクスチャは全て現在時刻の記事なので、窓の影響を受けない。
 // - 主要媒体成分: 主要媒体グループの重み合計 W に 10 × log2(1 + W) の圧縮
 // - 広がり成分: その他媒体のグループは +0.5/グループ、上限 +5
 // - グループ数成分: min(G, 20) × 0.8 / バージョン成分: min(版数, 5) × 2
@@ -40,8 +42,8 @@ function approx(actual, expected) {
   assert.ok(Math.abs(actual - expected) < 0.01, `score ${actual} != ${expected}`);
 }
 
-// 主要媒体1グループだけの基本形: 10*log2(1+3) + グループ数 0.8 + 版 2 + 新しさ 5 = 27.8
-const BASE_MAJOR = 10 * Math.log2(4) + 0.8 + 2 + 5;
+// 主要媒体1グループだけの基本形: 10*log2(1+3) + グループ数 0.8 + 版 2 = 22.8
+const BASE_MAJOR = 10 * Math.log2(4) + 0.8 + 2;
 
 test('B: 同一配信（同じ正規化タイトル）は1グループに畳み、最大重みの媒体で代表する', () => {
   const db = openDb(':memory:');
@@ -67,8 +69,8 @@ test('主要媒体の独自報道はグループごとに積み上がるが log 
       { source: '毎日', title: '車いすマラソン 金華が優勝 記者が現地で見た熱戦' },
     ],
   });
-  // 主要媒体グループ2つ: W=6 → 10*log2(7)、グループ数 2×0.8、版 2、新しさ 5
-  approx(importanceFor(db, id), 10 * Math.log2(7) + 1.6 + 2 + 5);
+  // 主要媒体グループ2つ: W=6 → 10*log2(7)、グループ数 2×0.8、版 2
+  approx(importanceFor(db, id), 10 * Math.log2(7) + 1.6 + 2);
 });
 
 test('広がり成分: 主要媒体でない媒体のグループは +0.5 ずつ、上限 +5', () => {
@@ -78,8 +80,8 @@ test('広がり成分: 主要媒体でない媒体のグループは +0.5 ずつ
     articles.push({ source: '西日本新聞me', title: `地域の話題 その${i + 1} 地区で催し` });
   }
   const id = makeCluster(db, { articles });
-  // 主要媒体成分 0、広がり min(15*0.5, 5)=5、グループ数 min(15,20)*0.8=12、版 2、新しさ 5
-  approx(importanceFor(db, id), 0 + 5 + 12 + 2 + 5);
+  // 主要媒体成分 0、広がり min(15*0.5, 5)=5、グループ数 min(15,20)*0.8=12、版 2
+  approx(importanceFor(db, id), 0 + 5 + 12 + 2);
 });
 
 test('上限: グループ数成分は20グループ、バージョン成分は5版で頭打ち', () => {
@@ -89,8 +91,8 @@ test('上限: グループ数成分は20グループ、バージョン成分は5
     articles.push({ source: '朝日', title: `大規模な出来事 側面${i + 1}からの報道` });
   }
   const id = makeCluster(db, { articles, extraVersions: 6 });
-  // W=90 → 10*log2(91)、グループ数 min(30,20)*0.8=16、版 min(7,5)*2=10、新しさ 5
-  approx(importanceFor(db, id), 10 * Math.log2(91) + 16 + 10 + 5);
+  // W=90 → 10*log2(91)、グループ数 min(30,20)*0.8=16、版 min(7,5)*2=10
+  approx(importanceFor(db, id), 10 * Math.log2(91) + 16 + 10);
   // 旧式（重み合計90＋記事数30＋版14＋新しさ5=139）より大幅に圧縮されていること
   assert.ok(importanceFor(db, id) < 100);
 });

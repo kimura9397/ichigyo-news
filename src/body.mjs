@@ -547,7 +547,7 @@ export async function fetchClusterBodies(db, clusterId, { fetchImpl = fetch, res
 const IMAGE_BATCH_LIMIT = 50; // 1回のバッチで処理するクラスタ数の上限
 const IMAGE_BATCH_TIMEOUT_MS = 8000;
 const IMAGE_BATCH_PARALLEL = 4;
-const IMPORTANT_THRESHOLD = 45; // server.mjs の重要タブ閾値と合わせる
+const IMPORTANT_THRESHOLD = 40; // server.mjs の重要タブ閾値と合わせる
 
 /**
  * 重要タブの並び順（時間減衰込み。server.mjs の tabOrder と同じ考え方）で上位クラスタを選び、
