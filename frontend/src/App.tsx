@@ -1162,9 +1162,24 @@ function App() {
           <h1>一行ニュース</h1>
         </div>
         <div className="masthead-side">
-          <p className="masthead-note">
-            各紙の報道・要点・社説を並べ、初報を v1、続報を別行の v2 として開きます。
-          </p>
+          <div className="masthead-text">
+            <p className="masthead-note">
+              <span>各紙の報道と社説を一行に。</span>
+              <span>続報は版で重ねます。</span>
+            </p>
+            <p className="masthead-contact">
+              要望・不具合の報告は
+              <a
+                href="https://x.com/ichigyo_news"
+                target="_blank"
+                rel="noopener noreferrer"
+                aria-label="X（@ichigyo_news）"
+              >
+                X
+              </a>
+              まで
+            </p>
+          </div>
           <div className="masthead-actions">
             {bgRefreshing ? (
               <span className="refreshing-note">背後で更新中…</span>

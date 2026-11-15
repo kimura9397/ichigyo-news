@@ -36,8 +36,37 @@
   margin: 0;
   max-width: 19rem;
   font-size: calc(12px * var(--font-scale));
+  line-height: 1.6;
   color: var(--muted);
   text-align: end;
+}
+
+/* 説明文は文ごとにブロック化し、文の途中ではなく区切りで改行させる */
+.masthead-note > span {
+  display: block;
+}
+
+/* 説明文と連絡先行を縦に積む、マストヘッド右側のテキスト群 */
+.masthead-text {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+/* 要望・不具合の報告先を示す控えめな連絡先行。リンクだけアクセント色にする */
+.masthead-contact {
+  margin: 0;
+  font-size: calc(11px * var(--font-scale));
+  line-height: 1.5;
+  color: var(--muted);
+  text-align: end;
+}
+
+.masthead-contact a {
+  color: var(--vermillion);
+  text-decoration: underline;
+  text-underline-offset: 2px;
 }
 
 .tabs {
@@ -426,6 +455,10 @@
   .masthead-note {
     text-align: start;
     max-width: none;
+  }
+
+  .masthead-contact {
+    text-align: start;
   }
 
   /* 狭幅は一覧と詳細を横に並べた全画面ページャー（スワイプで左右を行き来）。
