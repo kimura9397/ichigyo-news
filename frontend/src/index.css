@@ -79,3 +79,32 @@ button:focus-visible {
   background: #171310;
   color-scheme: dark;
 }
+
+/* アクセント色（2026-11-15 ユーザー決定）: 既定は朱。設定メニューで用意した色見本から
+   選ぶと <html data-accent> が切り替わり、--vermillion が差し替わる（アプリ内UIのみ）。
+   favicon はブランドとして朱に固定で、アクセント変更の対象外。
+   各色はライト/ダーク両方でコントラスト基準（test/theme-contrast.test.mjs）を満たす値にする。 */
+:root[data-accent='ai'] {
+  --vermillion: #1d4e89;
+}
+:root[data-theme='dark'][data-accent='ai'] {
+  --vermillion: #7aa7d9;
+}
+:root[data-accent='midori'] {
+  --vermillion: #20603c;
+}
+:root[data-theme='dark'][data-accent='midori'] {
+  --vermillion: #6fbf8f;
+}
+:root[data-accent='murasaki'] {
+  --vermillion: #60367c;
+}
+:root[data-theme='dark'][data-accent='murasaki'] {
+  --vermillion: #b79ce0;
+}
+:root[data-accent='sumi'] {
+  --vermillion: #38322b;
+}
+:root[data-theme='dark'][data-accent='sumi'] {
+  --vermillion: #a89f92;
+}

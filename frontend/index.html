@@ -16,6 +16,8 @@
           (t === 'system' &&
             window.matchMedia('(prefers-color-scheme: dark)').matches)
         document.documentElement.dataset.theme = dark ? 'dark' : 'light'
+        document.documentElement.dataset.accent =
+          localStorage.getItem('ichigyo:accent') || 'shu'
         document.documentElement.dataset.fontSize =
           localStorage.getItem('ichigyo:fontSize') || 'medium'
       } catch (e) {

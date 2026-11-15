@@ -51,6 +51,44 @@ function mix(hex1, p, hex2) {
 const TEXT_MIN = 4.5;
 const UI_MIN = 3.0;
 
+// アクセント色（data-accent の --vermillion 上書き）: 朱以外の選択肢が両テーマ分の値を持ち、
+// 朱色と同じペア基準を満たすことを固定する。
+const accentLight = new Map();
+const accentDark = new Map();
+for (const m of css.matchAll(/:root\[data-accent='(\w+)'\]\s*\{\s*--vermillion:\s*(#[0-9a-fA-F]{6})/g)) {
+  accentLight.set(m[1], m[2]);
+}
+for (const m of css.matchAll(/:root\[data-theme='dark'\]\[data-accent='(\w+)'\]\s*\{\s*--vermillion:\s*(#[0-9a-fA-F]{6})/g)) {
+  accentDark.set(m[1], m[2]);
+}
+
+test('アクセント色の選択肢が両テーマ分の値を持つ', () => {
+  assert.ok(accentLight.size >= 3, `アクセントの選択肢が少なすぎます: ${accentLight.size}`);
+  for (const id of accentLight.keys()) {
+    assert.ok(accentDark.has(id), `アクセント ${id} のダーク値がありません`);
+  }
+});
+
+for (const [id, lightValue] of accentLight) {
+  test(`アクセント ${id}: 両テーマで ${TEXT_MIN}:1 以上`, () => {
+    const darkValue = accentDark.get(id);
+    const pairs = [
+      ['ライト accent/paper', lightValue, light.paper],
+      ['ライト accent/bg', lightValue, light.__bg],
+      ['ライト paper/accent', light.paper, lightValue],
+      ['ライト バッジ', lightValue, mix(lightValue, 0.12, light['tint-base'])],
+      ['ダーク accent/paper', darkValue, dark.paper],
+      ['ダーク accent/bg', darkValue, dark.__bg],
+      ['ダーク paper/accent', dark.paper, darkValue],
+      ['ダーク バッジ', darkValue, mix(darkValue, 0.12, dark['tint-base'])],
+    ];
+    for (const [label, fg, bg] of pairs) {
+      const r = contrast(fg, bg);
+      assert.ok(r >= TEXT_MIN, `${label} = ${r.toFixed(2)} < ${TEXT_MIN}`);
+    }
+  });
+}
+
 for (const [name, t] of [['ライト', light], ['ダーク', dark]]) {
   test(`${name}テーマ: テキストペアが ${TEXT_MIN}:1 以上`, () => {
     const pairs = [

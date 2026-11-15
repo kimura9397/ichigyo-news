@@ -100,6 +100,15 @@ type EditorialState = 'unchecked' | 'loading' | 'done'
 type BodyState = 'loading' | 'done'
 type FontSizeSetting = 'small' | 'medium' | 'large'
 type ThemeSetting = 'light' | 'dark' | 'system'
+/** アクセント色の選択肢（新聞の世界観に合う色見本から選ぶ。既定は朱）。 */
+const ACCENTS = [
+  { id: 'shu', label: '朱', color: '#b13224' },
+  { id: 'ai', label: '藍', color: '#1d4e89' },
+  { id: 'midori', label: '深緑', color: '#20603c' },
+  { id: 'murasaki', label: '紫', color: '#60367c' },
+  { id: 'sumi', label: '墨', color: '#38322b' },
+] as const
+type AccentSetting = (typeof ACCENTS)[number]['id']
 
 interface ListPage {
   ids: string[]
@@ -229,6 +238,14 @@ function App() {
       return 'light'
     }
   })
+  const [accent, setAccent] = useState<AccentSetting>(() => {
+    try {
+      const v = localStorage.getItem('ichigyo:accent')
+      return ACCENTS.some((a) => a.id === v) ? (v as AccentSetting) : 'shu'
+    } catch {
+      return 'shu'
+    }
+  })
   const [dimRead, setDimRead] = useState<boolean>(() => {
     try {
       return localStorage.getItem('ichigyo:dimRead') !== '0'
@@ -282,6 +299,15 @@ function App() {
       /* 同上 */
     }
   }, [theme])
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('ichigyo:accent', accent)
+    } catch {
+      /* 同上 */
+    }
+    document.documentElement.dataset.accent = accent
+  }, [accent])
 
   // テーマの実効値（「端末に合わせる」は prefers-color-scheme で解決）を <html data-theme> に反映する
   useEffect(() => {
@@ -1288,6 +1314,35 @@ function App() {
                             }
                           >
                             {label}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                    <div className="menu-row">
+                      <span className="menu-label">アクセント色</span>
+                      <div
+                        className="accent-swatches"
+                        role="group"
+                        aria-label="アクセント色"
+                      >
+                        {ACCENTS.map((a) => (
+                          <button
+                            key={a.id}
+                            type="button"
+                            className={
+                              accent === a.id
+                                ? 'accent-swatch is-active'
+                                : 'accent-swatch'
+                            }
+                            onClick={() => setAccent(a.id)}
+                            aria-pressed={accent === a.id}
+                            title={a.label}
+                          >
+                            <span
+                              className="accent-dot"
+                              style={{ background: a.color }}
+                            />
+                            {a.label}
                           </button>
                         ))}
                       </div>
