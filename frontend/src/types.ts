@@ -60,3 +60,4 @@ export type FeedTab =
   | 'editorials'
   | 'bookmarks'
   | 'watch'
+  | 'search'

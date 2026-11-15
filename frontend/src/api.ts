@@ -483,7 +483,8 @@ export async function fetchTabRows(
   mutedCategories: string[] = [],
   watchKeywords: string[] = [],
 ): Promise<StoriesPage> {
-  const apiTab = tab === 'fresh' ? 'new' : tab
+  // UIの 'search' はサーバー側では tab=watch（キーワード部分一致）として扱う
+  const apiTab = tab === 'fresh' ? 'new' : tab === 'search' ? 'watch' : tab
   const params = new URLSearchParams({
     tab: apiTab,
     limit: String(limit),

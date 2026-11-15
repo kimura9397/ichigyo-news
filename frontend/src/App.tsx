@@ -5,6 +5,7 @@ import {
   useRef,
   useState,
   type CSSProperties,
+  type FormEvent as ReactFormEvent,
   type KeyboardEvent as ReactKeyboardEvent,
   type PointerEvent as ReactPointerEvent,
 } from 'react'
@@ -406,6 +407,37 @@ function App() {
     goToListPane()
   }
 
+  // キーワード検索（2026-11-15 ユーザー決定）。一致判定はウォッチと同じ tab=watch を使う
+  const [searchInput, setSearchInput] = useState('')
+  /** 検索を実行した語（'' は未検索） */
+  const [searchQuery, setSearchQuery] = useState('')
+  const searchQueryRef = useRef('')
+
+  useEffect(() => {
+    searchQueryRef.current = searchQuery
+  }, [searchQuery])
+
+  function submitSearch(e: ReactFormEvent) {
+    e.preventDefault()
+    const q = searchInput.replace(/,/g, ' ').trim().replace(/\s+/g, ' ')
+    acknowledgeNew()
+    setSearchQuery(q)
+    setSelectedId(null)
+    setOutletId(null)
+    setCoverageKind('summary')
+    goToListPane()
+  }
+
+  /** 検索中の語をウォッチのキーワードに登録し、結果をトーストで知らせる。 */
+  function registerSearchKeyword() {
+    if (!searchQuery) return
+    if (addKeyword(searchQuery)) {
+      setToast(`「${searchQuery}」をキーワードウォッチに登録しました`)
+    } else {
+      setToast(`「${searchQuery}」はすでに登録されています`)
+    }
+  }
+
   /** 重要タブのカテゴリミュート切替。条件が変わるので重要タブのキャッシュは捨てる。 */
   function toggleMuteCategory(cat: string) {
     setMutedCategories((prev) =>
@@ -501,20 +533,32 @@ function App() {
   const key = listKey(
     tab,
     category,
-    tab === 'watch' ? (watchKeyword ?? '__all__') : '',
+    tab === 'watch'
+      ? (watchKeyword ?? '__all__')
+      : tab === 'search'
+        ? `q:${searchQuery}`
+        : '',
   )
   const page = pages[key] ?? null
 
   const loadPage = useCallback(
     async (target: FeedTab, cat: string, offset: number, append: boolean) => {
       const scope =
-        target === 'watch' ? (watchKeywordRef.current ?? '__all__') : ''
+        target === 'watch'
+          ? (watchKeywordRef.current ?? '__all__')
+          : target === 'search'
+            ? `q:${searchQueryRef.current}`
+            : ''
       const watchKeywords =
         target === 'watch'
           ? watchKeywordRef.current
             ? [watchKeywordRef.current]
             : keywordsRef.current
-          : []
+          : target === 'search'
+            ? searchQueryRef.current
+              ? [searchQueryRef.current]
+              : []
+            : []
       try {
         const result = await fetchTabRows(
           target,
@@ -1399,6 +1443,29 @@ function App() {
             <span className="bookmark-count">{keywords.length}</span>
           ) : null}
         </button>
+        <button
+          type="button"
+          className={tab === 'search' ? 'search-nav is-active' : 'search-nav'}
+          onClick={() => switchTab('search')}
+          aria-current={tab === 'search' ? 'page' : undefined}
+          aria-label="キーワード検索を開く"
+          title="キーワード検索"
+        >
+          <svg
+            width="17"
+            height="17"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            aria-hidden="true"
+          >
+            <circle cx="11" cy="11" r="7" />
+            <line x1="21" y1="21" x2="16.5" y2="16.5" />
+          </svg>
+        </button>
       </nav>
 
       <div className="cat-bar" role="tablist" aria-label="カテゴリ">
@@ -1428,6 +1495,40 @@ function App() {
           ),
         )}
       </div>
+
+      {tab === 'search' ? (
+        <div className="search-bar">
+          <form className="search-form" onSubmit={submitSearch} role="search">
+            <input
+              className="search-input"
+              type="search"
+              value={searchInput}
+              onChange={(e) => setSearchInput(e.target.value)}
+              placeholder="キーワードを入力（例: 今田美桜）"
+              aria-label="検索キーワード"
+              maxLength={50}
+            />
+            <button type="submit" className="kw-add search-submit">
+              検索
+            </button>
+          </form>
+          {searchQuery ? (
+            keywords.includes(searchQuery) ? (
+              <button type="button" className="search-register" disabled>
+                「{searchQuery}」は登録済み
+              </button>
+            ) : (
+              <button
+                type="button"
+                className="search-register"
+                onClick={registerSearchKeyword}
+              >
+                「{searchQuery}」をキーワードに登録する
+              </button>
+            )
+          ) : null}
+        </div>
+      ) : null}
 
       {tab === 'watch' ? (
         <div className="watch-bar" role="tablist" aria-label="キーワード">
@@ -1475,11 +1576,15 @@ function App() {
           ) : visible.length === 0 ? (
             <p className="empty">
               {loadError ??
-                (tab === 'watch' && keywords.length === 0
-                  ? 'キーワードが登録されていません。設定メニュー（右上のハンバーガー）からキーワードを登録してください。'
-                  : tab === 'watch' && watchKeyword
-                    ? `「${watchKeyword}」に一致するニュースはまだありません。`
-                    : 'この条件に表示するニュースはありません。')}
+                (tab === 'search' && !searchQuery
+                  ? '上の入力欄にキーワードを入れて検索してください。一致はクラスタと記事の見出し・要約が対象です。'
+                  : tab === 'search'
+                    ? `「${searchQuery}」に一致するニュースはありません。`
+                    : tab === 'watch' && keywords.length === 0
+                      ? 'キーワードが登録されていません。設定メニュー（右上のハンバーガー）からキーワードを登録してください。'
+                      : tab === 'watch' && watchKeyword
+                        ? `「${watchKeyword}」に一致するニュースはまだありません。`
+                        : 'この条件に表示するニュースはありません。')}
             </p>
           ) : (
             <>

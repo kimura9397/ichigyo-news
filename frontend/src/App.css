@@ -60,7 +60,8 @@
 
 /* ブックマークとキーワードウォッチはタブではなく、タブ行の右端に置く見た目の違うアイコンボタン */
 .bookmark-nav,
-.watch-nav {
+.watch-nav,
+.search-nav {
   appearance: none;
   flex: 0 0 auto;
   align-self: center;
@@ -77,13 +78,15 @@
 }
 
 .bookmark-nav:hover,
-.watch-nav:hover {
+.watch-nav:hover,
+.search-nav:hover {
   color: var(--ink);
   border-color: var(--muted);
 }
 
 .bookmark-nav.is-active,
-.watch-nav.is-active {
+.watch-nav.is-active,
+.search-nav.is-active {
   color: var(--vermillion);
   border-color: var(--vermillion);
   background: color-mix(in srgb, var(--vermillion) 10%, var(--tint-base));
@@ -737,7 +740,8 @@
   }
 
   .bookmark-nav,
-  .watch-nav {
+  .watch-nav,
+  .search-nav {
     margin: 0 6px;
     padding: 6px 9px;
   }
@@ -1032,4 +1036,59 @@
 .kw-remove:hover {
   color: var(--vermillion);
   border-color: var(--vermillion);
+}
+
+/* --- キーワード検索バー --- */
+
+.search-bar {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  flex-wrap: wrap;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--line);
+}
+
+.search-form {
+  display: flex;
+  gap: 6px;
+  flex: 1;
+  min-width: min(260px, 100%);
+}
+
+.search-input {
+  flex: 1;
+  min-width: 0;
+  padding: 8px 14px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--paper);
+  color: var(--ink);
+  font: inherit;
+  font-size: 14px;
+}
+
+.search-submit {
+  padding: 8px 18px;
+  font-size: 13px;
+}
+
+.search-register {
+  appearance: none;
+  padding: 8px 14px;
+  border: 1px solid var(--vermillion);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--vermillion);
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 650;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.search-register:disabled {
+  border-color: var(--line);
+  color: var(--muted);
+  cursor: default;
 }
