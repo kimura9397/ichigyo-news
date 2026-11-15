@@ -10,7 +10,8 @@ import { fileURLToPath } from 'node:url';
 import { openDb } from './src/db.mjs';
 import { refresh, fetchEditorials, checkTopEditorials } from './src/collector.mjs';
 import { fetchClusterBodies, fetchTopImages } from './src/body.mjs';
-import { addBookmark, removeBookmark, isBookmarked, recordRead, foldOldReadEvents, pruneOldClusters, pruneFetchRuns, refilterBodies, backfillAuthors, splitOverMergedClusters, reevaluateEditorials } from './src/lifecycle.mjs';
+import { addBookmark, removeBookmark, isBookmarked, recordRead, foldOldReadEvents, pruneOldClusters, pruneFetchRuns, refilterBodies, backfillAuthors, splitOverMergedClusters, reevaluateEditorials, refreshSearchText } from './src/lifecycle.mjs';
+import { normalizeForSearch } from './src/normalize.mjs';
 
 const ROOT = dirname(fileURLToPath(import.meta.url));
 const PUBLIC_DIR = join(ROOT, 'public');
@@ -19,6 +20,9 @@ const HOST = process.env.HOST || undefined; // 未指定なら全インターフ
 const ACCESS_TOKEN = process.env.ACCESS_TOKEN || '';
 const DB_PATH = process.env.NEWS_DB_PATH || join(ROOT, 'data', 'news.db');
 const db = openDb(DB_PATH);
+// 検索用シャドウテキスト（title_norm / search_text）を起動時に現在値へ揃える
+// （旧バージョンで作られたDBや、直接投入された行でも検索が効くように）。
+refreshSearchText(db);
 
 function dbBytes() {
   try { return statSync(DB_PATH).size; } catch { return 0; }
@@ -112,18 +116,21 @@ function tabWhere(tab, category, muted = [], keywords = [], reporter = null) {
   }
   if (tab === 'watch') {
     // キーワードウォッチ/検索: 各クラスタ最新版の行だけを出す。
-    // 一致は「クラスタのタイトル、またはそのクラスタの記事（全版）のタイトル/要約への部分一致」。
-    // 本文は対象外。複数キーワードは OR。キーワードが無ければ一致なし（1 = 0）。
+    // 一致は「クラスタのタイトル、またはそのクラスタの記事（全版）のタイトル/要約/取得済み本文への
+    // 部分一致」。照合は表記ゆれ正規化済みのシャドウカラム（clusters.title_norm /
+    // articles.search_text）に対して行い、クエリ側も同じ正規化を通す（例: 「情報漏洩」で
+    // 「情報漏えい」の記事がヒットする）。複数キーワードは OR。キーワードが無ければ一致なし（1 = 0）。
     // 重要度スコアには混ぜない（中立のランキング維持）。
     conds.push('v.version_no = (SELECT MAX(v2.version_no) FROM versions v2 WHERE v2.cluster_id = c.id)');
-    if (keywords.length > 0) {
-      const perKeyword = keywords
-        .map(() => `(c.title LIKE ? ESCAPE '\\' OR EXISTS (SELECT 1 FROM articles ak WHERE ak.cluster_id = c.id AND (ak.title LIKE ? ESCAPE '\\' OR ak.summary LIKE ? ESCAPE '\\')))`)
+    const normalized = keywords.map((kw) => normalizeForSearch(kw)).filter((kw) => kw !== '');
+    if (normalized.length > 0) {
+      const perKeyword = normalized
+        .map(() => `(c.title_norm LIKE ? ESCAPE '\\' OR EXISTS (SELECT 1 FROM articles ak WHERE ak.cluster_id = c.id AND ak.search_text LIKE ? ESCAPE '\\'))`)
         .join(' OR ');
       conds.push(`(${perKeyword})`);
-      for (const kw of keywords) {
+      for (const kw of normalized) {
         const pattern = likePattern(kw);
-        params.push(pattern, pattern, pattern);
+        params.push(pattern, pattern);
       }
     } else {
       conds.push('1 = 0');
@@ -349,9 +356,10 @@ const server = createServer(async (req, res) => {
       const refilteredBodies = refilterBodies(db);
       const backfilledAuthors = backfillAuthors(db);
       const splitClusters = splitOverMergedClusters(db);
+      const refreshedSearchText = refreshSearchText(db);
       const reevaluatedEditorials = reevaluateEditorials(db);
       db.exec('VACUUM');
-      return sendJson(res, 200, { pruned_clusters: prunedClusters, folded_reads: foldedReads, refiltered_bodies: refilteredBodies, backfilled_authors: backfilledAuthors, split_clusters: splitClusters, reevaluated_editorials: reevaluatedEditorials, before_bytes: before, after_bytes: dbBytes() });
+      return sendJson(res, 200, { pruned_clusters: prunedClusters, folded_reads: foldedReads, refiltered_bodies: refilteredBodies, backfilled_authors: backfilledAuthors, split_clusters: splitClusters, refreshed_search_text: refreshedSearchText, reevaluated_editorials: reevaluatedEditorials, before_bytes: before, after_bytes: dbBytes() });
     }
     if (p === '/api/status' && req.method === 'GET') {
       const counts = db.prepare('SELECT (SELECT COUNT(*) FROM clusters) AS clusters, (SELECT COUNT(*) FROM versions) AS versions, (SELECT COUNT(*) FROM articles) AS articles').get();

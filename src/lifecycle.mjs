@@ -9,6 +9,7 @@
 // - 保存済みの社説（found=1）は現在の関連判定で再評価し、通らないものは found=0 に降格する（社説の誤マッチ対策、2026-11-15）。
 import { filterBodyLines, extractAuthorFromText } from './body.mjs';
 import { editorialRelated, importanceFor, bigrams, filterWeakBigrams, matchScore, jaccard, strongTerms, summaryWords, refineCategory } from './collector.mjs';
+import { normalizeForSearch, buildArticleSearchText } from './normalize.mjs';
 
 export const RETENTION_DAYS = 7;
 export const FETCH_RUNS_KEPT = 30;
@@ -182,7 +183,7 @@ export function splitOverMergedClusters(db) {
   const versionsStmt = db.prepare('SELECT id, title FROM versions WHERE cluster_id = ? AND version_no > 1 ORDER BY version_no');
   const v1Stmt = db.prepare('SELECT id FROM versions WHERE cluster_id = ? AND version_no = 1');
   const artsStmt = db.prepare('SELECT summary, published_at, fetched_at FROM articles WHERE version_id = ?');
-  const insCluster = db.prepare('INSERT INTO clusters (title, category, first_seen_at, last_seen_at, importance_score) VALUES (?, ?, ?, ?, 0)');
+  const insCluster = db.prepare('INSERT INTO clusters (title, title_norm, category, first_seen_at, last_seen_at, importance_score) VALUES (?, ?, ?, ?, ?, 0)');
   const moveVersion = db.prepare('UPDATE versions SET cluster_id = ?, version_no = 1 WHERE id = ?');
   const moveArticles = db.prepare('UPDATE articles SET cluster_id = ? WHERE version_id = ?');
   const updateScore = db.prepare('UPDATE clusters SET importance_score = ? WHERE id = ?');
@@ -215,7 +216,7 @@ export function splitOverMergedClusters(db) {
         const stamps = arts.map((a) => a.published_at || a.fetched_at).filter(Boolean).sort();
         const fetched = arts.map((a) => a.fetched_at || a.published_at).filter(Boolean).sort();
         const nowIso = new Date().toISOString();
-        const info = insCluster.run(v.title, refineCategory(v.title, c.category || ''), stamps[0] || nowIso, fetched[fetched.length - 1] || nowIso);
+        const info = insCluster.run(v.title, normalizeForSearch(v.title), refineCategory(v.title, c.category || ''), stamps[0] || nowIso, fetched[fetched.length - 1] || nowIso);
         const newId = Number(info.lastInsertRowid);
         moveVersion.run(newId, v.id);
         moveArticles.run(newId, v.id);
@@ -272,6 +273,27 @@ export function reevaluateEditorials(db) {
  * refresh 時に行うライフサイクル一式: 閲覧集計 → prune → fetch_runs 整理 → 本文の後がけ → 署名の後がけ → 過剰統合の分離 → 社説の再評価 → 自動 VACUUM 判定。
  * 戻り値: { prunedClusters, foldedReads, refilteredBodies, backfilledAuthors, splitClusters, reevaluatedEditorials, vacuumed }
  */
+/**
+ * キーワード検索/ウォッチの照合用シャドウテキスト（articles.search_text / clusters.title_norm）を
+ * 現在のタイトル・要約・本文から再計算する。本文の書き換え（ノイズ除去の再フィルタ等）や
+ * 旧バージョンで作られた行を取りこぼさないよう、値が変わる行だけを更新する。
+ * 更新した行数を返す。
+ */
+export function refreshSearchText(db) {
+  let updated = 0;
+  const updArticle = db.prepare('UPDATE articles SET search_text = ? WHERE id = ?');
+  for (const a of db.prepare('SELECT id, title, summary, body_text, search_text FROM articles').all()) {
+    const next = buildArticleSearchText(a.title, a.summary, a.body_text);
+    if (next !== a.search_text) { updArticle.run(next, a.id); updated++; }
+  }
+  const updCluster = db.prepare('UPDATE clusters SET title_norm = ? WHERE id = ?');
+  for (const c of db.prepare('SELECT id, title, title_norm FROM clusters').all()) {
+    const next = normalizeForSearch(c.title);
+    if (next !== c.title_norm) { updCluster.run(next, c.id); updated++; }
+  }
+  return updated;
+}
+
 export function runLifecycle(db, now = new Date()) {
   const foldedReads = foldOldReadEvents(db, now);
   const prunedClusters = pruneOldClusters(db, now);
@@ -279,7 +301,8 @@ export function runLifecycle(db, now = new Date()) {
   const refilteredBodies = refilterBodies(db);
   const backfilledAuthors = backfillAuthors(db);
   const splitClusters = splitOverMergedClusters(db);
+  const refreshedSearchText = refreshSearchText(db);
   const reevaluatedEditorials = reevaluateEditorials(db);
   const vacuumed = vacuumIfNeeded(db);
-  return { prunedClusters, foldedReads, refilteredBodies, backfilledAuthors, splitClusters, reevaluatedEditorials, vacuumed };
+  return { prunedClusters, foldedReads, refilteredBodies, backfilledAuthors, splitClusters, refreshedSearchText, reevaluatedEditorials, vacuumed };
 }

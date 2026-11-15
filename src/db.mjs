@@ -101,6 +101,9 @@ export function openDb(path) {
   ensureColumn(db, 'articles', 'body_fetched_at', 'TEXT');
   // 記者署名（バイライン）。本文取得時に抽出して保存する。取れなければ空（2026-11-15追加）
   ensureColumn(db, 'articles', 'author', "TEXT NOT NULL DEFAULT ''");
+  // キーワード検索/ウォッチの照合用シャドウカラム（src/normalize.mjs で正規化したテキスト）
+  ensureColumn(db, 'articles', 'search_text', "TEXT NOT NULL DEFAULT ''");
+  ensureColumn(db, 'clusters', 'title_norm', "TEXT NOT NULL DEFAULT ''");
   // GoogleニュースのラッパーURLから解決した実URLのキャッシュ
   ensureColumn(db, 'articles', 'resolved_url', "TEXT NOT NULL DEFAULT ''");
   // 本文を実際に取得したURLと経路（direct / resolved / yahoo）。出所の帰属表示に使う

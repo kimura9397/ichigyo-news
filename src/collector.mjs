@@ -4,6 +4,7 @@
 // 外部依存なし（fetch / 正規表現ベースのXMLパースのみ）。LLMは使わない。
 import { openDb} from './db.mjs';
 import { runLifecycle } from './lifecycle.mjs';
+import { normalizeForSearch, buildArticleSearchText } from './normalize.mjs';
 
 export const PAPERS = ['朝日', '毎日', '読売', '産経', '日経'];
 
@@ -528,7 +529,7 @@ versionId = latest.id;
 }
 db.prepare('UPDATE clusters SET last_seen_at = ? WHERE id = ?').run(nowIso, clusterId);
 } else {
-const info = db.prepare('INSERT INTO clusters (title, category, first_seen_at, last_seen_at) VALUES (?, ?, ?, ?)').run(title, refineCategory(title, raw.category || ''), raw.publishedAt || nowIso, nowIso);
+const info = db.prepare('INSERT INTO clusters (title, title_norm, category, first_seen_at, last_seen_at) VALUES (?, ?, ?, ?, ?)').run(title, normalizeForSearch(title), refineCategory(title, raw.category || ''), raw.publishedAt || nowIso, nowIso);
 clusterId = Number(info.lastInsertRowid);
 const v = db.prepare('INSERT INTO versions (cluster_id, version_no, title, created_at) VALUES (?, 1, ?, ?)').run(clusterId, title, nowIso);
 versionId = Number(v.lastInsertRowid);
@@ -557,7 +558,7 @@ duplicateHandled = true;
 break;
 }
 if (duplicateHandled) continue;
-db.prepare('INSERT INTO articles (cluster_id, version_id, source, title, url, summary, published_at, fetched_at, image_url, image_via) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').run(clusterId, versionId, source, title, raw.url, raw.summary || '', raw.publishedAt || null, nowIso, raw.imageUrl || '', raw.imageUrl ? 'rss' : '');
+db.prepare('INSERT INTO articles (cluster_id, version_id, source, title, url, summary, published_at, fetched_at, image_url, image_via, search_text) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').run(clusterId, versionId, source, title, raw.url, raw.summary || '', raw.publishedAt || null, nowIso, raw.imageUrl || '', raw.imageUrl ? 'rss' : '', buildArticleSearchText(title, raw.summary || '', ''));
 db.prepare('UPDATE clusters SET importance_score = ? WHERE id = ?').run(importanceFor(db, clusterId), clusterId);
 const entry = clusterCache.get(clusterId);
 if (entry) {
