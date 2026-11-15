@@ -328,7 +328,7 @@ function App() {
       <header className="masthead">
         <div className="brand">
           <p className="brand-kicker">同じニュースは、一行。</p>
-          <h1>一行</h1>
+          <h1>一行ニュース</h1>
         </div>
         <div className="masthead-side">
           <p className="masthead-note">
