@@ -892,11 +892,6 @@
   font-weight: 650;
 }
 
-.badge.body {
-  color: var(--fresh);
-  background: color-mix(in srgb, var(--fresh) 14%, var(--tint-base));
-}
-
 .body-badge {
   margin-left: 6px;
   padding: 0 5px;

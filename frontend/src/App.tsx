@@ -1723,9 +1723,6 @@ function App() {
                               ) : null}
                             </span>
                             <span className="badges">
-                              {(story.bodyCount ?? 0) > 0 ? (
-                                <span className="badge body">本文あり</span>
-                              ) : null}
                               {story.isImportant ? (
                                 <span className="badge important">重要</span>
                               ) : null}
