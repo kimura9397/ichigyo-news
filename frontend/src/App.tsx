@@ -137,6 +137,7 @@ function App() {
   const [toast, setToast] = useState<string | null>(null)
   const detailRef = useRef<HTMLElement | null>(null)
   const workspaceRef = useRef<HTMLDivElement | null>(null)
+  const versionRailRef = useRef<HTMLOListElement | null>(null)
 
   // 一覧ペインの幅比率。境界ドラッグで変え、localStorage に保存して復元する
   const [paneRatio, setPaneRatio] = useState<number>(() => {
@@ -798,6 +799,20 @@ function App() {
   }, [selectedId, visible])
 
   const related = selected ? versionsOfEvent(allRows, selected.eventId) : []
+
+  // 版チップ列（横スクロール）では、選択中のチップが常に視界に入るよう列側だけをスクロールする
+  const selectedRowId = selected?.id
+  useEffect(() => {
+    const rail = versionRailRef.current
+    if (!rail || !selectedRowId) return
+    const active = rail.querySelector<HTMLElement>('.version-chip.is-active')
+    if (!active) return
+    const left = active.offsetLeft
+    const right = left + active.offsetWidth
+    if (left < rail.scrollLeft || right > rail.scrollLeft + rail.clientWidth) {
+      rail.scrollLeft = Math.max(0, left - 8)
+    }
+  }, [selectedRowId, related.length])
 
   // 詳細（各紙の報道）を開いたクラスタについて取得し、全バージョン行へ反映する
   const selectedClusterId = selected?.clusterId
@@ -1769,6 +1784,14 @@ function App() {
               </button>
               <p className="event-title">{selected.eventTitle}</p>
               <h2>{selected.title}</h2>
+              <p className="version-meta">
+                v{selected.version}
+                {selected.version === 1 ? ' · 初報' : ' · 続報'}
+                {' · '}
+                <time dateTime={selected.versionCreatedAt}>
+                  {formatWhen(selected.versionCreatedAt)}
+                </time>
+              </p>
               <p className="detail-lead">{selected.lead}</p>
               <div className="detail-actions">
                 <button
@@ -1786,7 +1809,11 @@ function App() {
                     : 'ブックマーク'}
                 </button>
               </div>
-              <ol className="version-rail" aria-label="この出来事の版">
+              <ol
+                className="version-rail"
+                aria-label="この出来事の版"
+                ref={versionRailRef}
+              >
                 {related.map((story) => (
                   <li key={story.id}>
                     <button
@@ -1796,10 +1823,11 @@ function App() {
                           ? 'version-chip is-active'
                           : 'version-chip'
                       }
+                      aria-current={story.id === selected.id || undefined}
+                      title={`v${story.version}${story.version === 1 ? '（初報）' : '（続報）'} · ${formatWhen(story.versionCreatedAt)}`}
                       onClick={() => openStory(story.id)}
                     >
                       v{story.version}
-                      {story.version === 1 ? ' 初報' : ' 続報'}
                     </button>
                   </li>
                 ))}

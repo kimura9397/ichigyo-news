@@ -36,6 +36,8 @@ export interface StoryRow {
   clusterId: number
   eventTitle: string
   version: number
+  /** その版が作られた日時（詳細ヘッダの版メタ表示用） */
+  versionCreatedAt: string
   title: string
   lead: string
   publishedAt: string
