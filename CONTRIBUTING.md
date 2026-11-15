@@ -13,6 +13,13 @@
 - テスト（`npm test`）が全て通過してから `main` へマージします。マージはマージコミットを作成します（`--no-ff`）。
 - マージ後はブランチを削除します。
 
+## Issue と PR の運用（Issue ドリブン）
+
+- **全ての PR は Issue を起点とします。** 先に Issue を作り、PR 本文の冒頭で `Closes #<番号>` と書いてリンクしてください。対応 Issue の無い PR は受け付けません（PR テンプレートの「対応 Issue」欄が必須なのはこのためです）。
+- Issue はテンプレートから作ります。バグ報告と機能要望の2種類があり、自由形式の Issue は無効化しています。使い方の相談や感想は Issue ではなく X（[@ichigyo_news](https://x.com/ichigyo_news)）へお願いします（Issue 作成画面にも導線があります）。
+- 1つの Issue に対して 1つのブランチ／PR を対応させます。Issue の範囲を超える変更が要る場合は、別の Issue を立ててください。
+- Muse の作業環境（次節の API push 運用）ではリモートに PR を作りませんが、ルールは同じです。作業を始める前に起点となる Issue を用意し、ブランチのコミットメッセージに対応 Issue の番号（`#<番号>`）を含めて、後から辿れるようにします。
+
 ## この環境での push について
 
 - Muse の作業環境（VM）からは SSH の外向き通信ができないため、GitHub への push は **Git Data API 経由**で行います（`~/workspace/custom-connectors/custom.github/bin/push_repo.py`）。これはローカルの `main` をリモートの `main` へミラーする仕組みで、リモートにブランチは作られません。
