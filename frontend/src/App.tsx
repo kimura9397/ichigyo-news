@@ -46,6 +46,10 @@ const PANE_RATIO_DEFAULT = 0.38
 const PANE_RATIO_MIN_PX = 270
 const PANE_RATIO_MAX = 0.65
 
+// 狭幅レイアウトの境界（App.css の @media と一致させる）。
+// 狭幅では一覧と詳細を横に並べた全画面ページャーになる（2026-11-15 ユーザー決定）
+const NARROW_MEDIA = '(max-width: 860px)'
+
 /** 本文テキストを段落ごとに <p> で描く（改行を行・段落の区切りとして扱う）。 */
 function Paragraphs({ text }: { text: string }) {
   const paras = text
@@ -589,17 +593,27 @@ function App() {
     visibleCoverages.find((coverage) => coverage.outletId === outletId) ??
     visibleCoverages[0]
 
+  /** 狭幅ページャーで一覧ペインへ戻す（広い画面では横スクロールしないため無害）。 */
+  function goToListPane() {
+    workspaceRef.current?.scrollTo({ left: 0, behavior: 'auto' })
+  }
+
+  /** 狭幅ページャーで詳細ペイン（右隣）へスムーズスクロールする。 */
+  function goToDetailPane() {
+    const ws = workspaceRef.current
+    if (!ws) return
+    ws.scrollTo({ left: ws.clientWidth, behavior: 'smooth' })
+  }
+
   function openStory(id: string) {
     acknowledgeNew()
     setSelectedId(id)
     setOutletId(null)
     setCoverageKind('summary')
-    // 詳細ペインを先頭に戻し、スマホでは詳細が視界に入るようスクロールする
+    // 詳細ペインを先頭に戻し、スマホではページャーを詳細側へスクロールする
     requestAnimationFrame(() => {
       detailRef.current?.scrollTo({ top: 0 })
-      if (window.matchMedia('(max-width: 860px)').matches) {
-        detailRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
-      }
+      if (window.matchMedia(NARROW_MEDIA).matches) goToDetailPane()
     })
   }
 
@@ -609,6 +623,7 @@ function App() {
     setSelectedId(null)
     setOutletId(null)
     setCoverageKind('summary')
+    goToListPane()
   }
 
   function switchCategory(next: string) {
@@ -617,6 +632,7 @@ function App() {
     setSelectedId(null)
     setOutletId(null)
     setCoverageKind('summary')
+    goToListPane()
   }
 
   async function toggleBookmark() {
@@ -683,6 +699,7 @@ function App() {
       setBodyState({})
       setSelectedId(null)
       setOutletId(null)
+      goToListPane()
       await loadPage(tab, category, 0, false)
       fetchDbStatus()
         .then((s) => setDbBytes(s.dbBytes))
@@ -1079,6 +1096,13 @@ function App() {
         {selected ? (
           <article className="detail-pane" ref={detailRef}>
             <header className="detail-head">
+              <button
+                type="button"
+                className="back-to-list"
+                onClick={goToListPane}
+              >
+                ← 一覧へ戻る
+              </button>
               <p className="event-title">{selected.eventTitle}</p>
               <h2>{selected.title}</h2>
               <p className="detail-lead">{selected.lead}</p>
