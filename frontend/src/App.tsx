@@ -99,16 +99,40 @@ type DetailState = 'loading' | 'loaded'
 type EditorialState = 'unchecked' | 'loading' | 'done'
 type BodyState = 'loading' | 'done'
 type FontSizeSetting = 'small' | 'medium' | 'large'
-type ThemeSetting = 'light' | 'dark' | 'system'
-/** アクセント色の選択肢（新聞の世界観に合う色見本から選ぶ。既定は朱）。 */
-const ACCENTS = [
-  { id: 'shu', label: '朱', color: '#b13224' },
-  { id: 'ai', label: '藍', color: '#1d4e89' },
-  { id: 'midori', label: '深緑', color: '#20603c' },
-  { id: 'murasaki', label: '紫', color: '#60367c' },
-  { id: 'sumi', label: '墨', color: '#38322b' },
+/**
+ * テーマプリセット（2026-11-16 ユーザー決定）。旧「テーマ（ライト/ダーク/端末）」と
+ * 「アクセント色（5色）」を一本化したもので、各プリセットがパレット全体を決める。
+ * 'system' は端末に合わせる（ライト→紙、ダーク→墨）。
+ */
+const THEME_PRESETS = [
+  { id: 'kami', label: '紙', title: '紙色の背景に墨の文字、朱の差し色（これまでのライト）', color: '#f4eee3' },
+  { id: 'sumi', label: '墨', title: '暗い地に明るい文字（これまでのダーク）', color: '#262019' },
+  { id: 'koshi', label: '古紙', title: '茶色く沈めた、古い紙のような明るい色', color: '#efddba' },
+  { id: 'shirokuro', label: '白黒', title: '純白と真っ黒の高コントラスト', color: '#ffffff' },
+  {
+    id: 'system',
+    label: '端末に合わせる',
+    title: '端末がライトなら「紙」、ダークなら「墨」',
+    color: 'linear-gradient(90deg, #f4eee3 50%, #262019 50%)',
+  },
 ] as const
-type AccentSetting = (typeof ACCENTS)[number]['id']
+type ThemePreset = (typeof THEME_PRESETS)[number]['id']
+
+/**
+ * 保存済みテーマの初期値。新しい保存先（ichigyo:themePreset）があればそれを使い、
+ * 無ければ旧キー（ichigyo:theme）から移行する（ダーク→墨、端末→system、それ以外→紙）。
+ * アクセント色の旧キー（ichigyo:accent）は廃止され、読み捨てる。
+ */
+function initialThemePreset(): ThemePreset {
+  try {
+    const v = localStorage.getItem('ichigyo:themePreset')
+    if (THEME_PRESETS.some((p) => p.id === v)) return v as ThemePreset
+    const old = localStorage.getItem('ichigyo:theme')
+    return old === 'dark' ? 'sumi' : old === 'system' ? 'system' : 'kami'
+  } catch {
+    return 'kami'
+  }
+}
 
 interface ListPage {
   ids: string[]
@@ -230,22 +254,9 @@ function App() {
       return 'medium'
     }
   })
-  const [theme, setTheme] = useState<ThemeSetting>(() => {
-    try {
-      const v = localStorage.getItem('ichigyo:theme')
-      return v === 'dark' || v === 'system' ? v : 'light'
-    } catch {
-      return 'light'
-    }
-  })
-  const [accent, setAccent] = useState<AccentSetting>(() => {
-    try {
-      const v = localStorage.getItem('ichigyo:accent')
-      return ACCENTS.some((a) => a.id === v) ? (v as AccentSetting) : 'shu'
-    } catch {
-      return 'shu'
-    }
-  })
+  const [themePreset, setThemePreset] = useState<ThemePreset>(
+    initialThemePreset,
+  )
   const [dimRead, setDimRead] = useState<boolean>(() => {
     try {
       return localStorage.getItem('ichigyo:dimRead') !== '0'
@@ -294,33 +305,32 @@ function App() {
 
   useEffect(() => {
     try {
-      localStorage.setItem('ichigyo:theme', theme)
+      localStorage.setItem('ichigyo:themePreset', themePreset)
+      // 旧キーは移行済みなので残っていれば片付ける
+      localStorage.removeItem('ichigyo:theme')
+      localStorage.removeItem('ichigyo:accent')
     } catch {
       /* 同上 */
     }
-  }, [theme])
+  }, [themePreset])
 
-  useEffect(() => {
-    try {
-      localStorage.setItem('ichigyo:accent', accent)
-    } catch {
-      /* 同上 */
-    }
-    document.documentElement.dataset.accent = accent
-  }, [accent])
-
-  // テーマの実効値（「端末に合わせる」は prefers-color-scheme で解決）を <html data-theme> に反映する
+  // テーマの実効値（「端末に合わせる」は 紙／墨 に解決）を <html data-theme> に反映する
   useEffect(() => {
     const mq = window.matchMedia('(prefers-color-scheme: dark)')
     const apply = () => {
-      const dark = theme === 'dark' || (theme === 'system' && mq.matches)
-      document.documentElement.dataset.theme = dark ? 'dark' : 'light'
+      const resolved =
+        themePreset === 'system'
+          ? mq.matches
+            ? 'sumi'
+            : 'kami'
+          : themePreset
+      document.documentElement.dataset.theme = resolved
     }
     apply()
-    if (theme !== 'system') return
+    if (themePreset !== 'system') return
     mq.addEventListener('change', apply)
     return () => mq.removeEventListener('change', apply)
-  }, [theme])
+  }, [themePreset])
 
   useEffect(() => {
     try {
@@ -1303,61 +1313,28 @@ function App() {
                     <div className="menu-row">
                       <span className="menu-label">テーマ</span>
                       <div
-                        className="segmented"
+                        className="preset-swatches"
                         role="group"
                         aria-label="テーマ"
                       >
-                        {(
-                          [
-                            ['light', 'ライト'],
-                            ['dark', 'ダーク'],
-                            ['system', '端末'],
-                          ] as const
-                        ).map(([value, label]) => (
+                        {THEME_PRESETS.map((p) => (
                           <button
-                            key={value}
+                            key={p.id}
                             type="button"
                             className={
-                              theme === value ? 'seg is-active' : 'seg'
+                              themePreset === p.id
+                                ? 'preset-swatch is-active'
+                                : 'preset-swatch'
                             }
-                            onClick={() => setTheme(value)}
-                            aria-pressed={theme === value}
-                            title={
-                              value === 'system'
-                                ? '端末に合わせる'
-                                : undefined
-                            }
-                          >
-                            {label}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                    <div className="menu-row">
-                      <span className="menu-label">アクセント色</span>
-                      <div
-                        className="accent-swatches"
-                        role="group"
-                        aria-label="アクセント色"
-                      >
-                        {ACCENTS.map((a) => (
-                          <button
-                            key={a.id}
-                            type="button"
-                            className={
-                              accent === a.id
-                                ? 'accent-swatch is-active'
-                                : 'accent-swatch'
-                            }
-                            onClick={() => setAccent(a.id)}
-                            aria-pressed={accent === a.id}
-                            title={a.label}
+                            onClick={() => setThemePreset(p.id)}
+                            aria-pressed={themePreset === p.id}
+                            title={p.title}
                           >
                             <span
-                              className="accent-dot"
-                              style={{ background: a.color }}
+                              className="preset-dot"
+                              style={{ background: p.color }}
                             />
-                            {a.label}
+                            {p.label}
                           </button>
                         ))}
                       </div>
