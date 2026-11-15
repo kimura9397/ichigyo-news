@@ -8,7 +8,7 @@
 // - 本文が保存済みで未抽出の記事には、本文中の署名表記から記者名を後がけ抽出する（記者バイライン、2026-11-15）。
 // - 保存済みの社説（found=1）は現在の関連判定で再評価し、通らないものは found=0 に降格する（社説の誤マッチ対策、2026-11-15）。
 import { filterBodyLines, extractAuthorFromText } from './body.mjs';
-import { editorialRelated, importanceFor } from './collector.mjs';
+import { editorialRelated, importanceFor, bigrams, filterWeakBigrams, matchScore, jaccard, strongTerms, summaryWords, refineCategory } from './collector.mjs';
 
 export const RETENTION_DAYS = 7;
 export const FETCH_RUNS_KEPT = 30;
@@ -158,6 +158,78 @@ export function backfillAuthors(db) {
   return filled;
 }
 
+/* ---------- 過剰統合クラスタの分離 ---------- */
+
+/**
+ * 過剰統合（連鎖的な合体）してしまったクラスタから、クラスタタイトルと無関係な版を
+ * 別クラスタへ切り出す保守処理。分離の単位は「版」で、版の代表見出しが
+ * - クラスタタイトルと matchScore 0（バイグラムの実質的な一致なし）
+ * - 生 Jaccard も 0.05 未満
+ * - 強い語を1つも共有しない
+ * - その版の記事要約と v1 の記事要約の語彙共有が3未満
+ * の全てを満たす場合に限って切り出す。要約の条件は、短い見出しや言い換えで
+ * 見出し同士が一致しなくても、同じ出来事の続報（例: 障害の原因報道、逮捕の続報）を
+ * 誤って切り出さないための安全弁。判定のアンカーはクラスタタイトル＋v1 に限り、
+ * 吸い込まれた版同士の類似（チェーンの残り）は根拠にしない。
+ * 切り出した版は新しいクラスタの v1 になる。社説は元のクラスタに残るが、同じ
+ * ライフサイクル内の後段で再評価（reevaluateEditorials）が新しい帰属で判定し直す。
+ * 版の中に混ざった記事単位の汚染までは分離できない（その限界は ISSUES.md に明記）。
+ * 切り出した版の数を返す。
+ */
+export function splitOverMergedClusters(db) {
+  const clusters = db.prepare('SELECT id, title, category FROM clusters').all();
+  if (!clusters.length) return 0;
+  const versionsStmt = db.prepare('SELECT id, title FROM versions WHERE cluster_id = ? AND version_no > 1 ORDER BY version_no');
+  const v1Stmt = db.prepare('SELECT id FROM versions WHERE cluster_id = ? AND version_no = 1');
+  const artsStmt = db.prepare('SELECT summary, published_at, fetched_at FROM articles WHERE version_id = ?');
+  const insCluster = db.prepare('INSERT INTO clusters (title, category, first_seen_at, last_seen_at, importance_score) VALUES (?, ?, ?, ?, 0)');
+  const moveVersion = db.prepare('UPDATE versions SET cluster_id = ?, version_no = 1 WHERE id = ?');
+  const moveArticles = db.prepare('UPDATE articles SET cluster_id = ? WHERE version_id = ?');
+  const updateScore = db.prepare('UPDATE clusters SET importance_score = ? WHERE id = ?');
+  let split = 0;
+  const affected = new Set();
+  db.exec('BEGIN IMMEDIATE');
+  try {
+    for (const c of clusters) {
+      const versions = versionsStmt.all(c.id);
+      if (!versions.length) continue;
+      const titleBg = filterWeakBigrams(bigrams(c.title));
+      const titleStrong = strongTerms(c.title);
+      const v1 = v1Stmt.get(c.id);
+      const v1Words = new Set();
+      if (v1) for (const a of artsStmt.all(v1.id)) for (const w of summaryWords(a.summary)) v1Words.add(w);
+      for (const v of versions) {
+        const vBg = filterWeakBigrams(bigrams(v.title));
+        if (matchScore(vBg, titleBg) > 0) continue;
+        if (jaccard(vBg, titleBg) >= 0.05) continue;
+        let sharedStrong = 0;
+        for (const t of strongTerms(v.title)) if (titleStrong.has(t)) sharedStrong++;
+        if (sharedStrong > 0) continue;
+        const arts = artsStmt.all(v.id);
+        if (!arts.length) continue;
+        const vWords = new Set();
+        for (const a of arts) for (const w of summaryWords(a.summary)) vWords.add(w);
+        let sharedWords = 0;
+        for (const w of vWords) if (v1Words.has(w)) sharedWords++;
+        if (sharedWords >= 3) continue;
+        const stamps = arts.map((a) => a.published_at || a.fetched_at).filter(Boolean).sort();
+        const fetched = arts.map((a) => a.fetched_at || a.published_at).filter(Boolean).sort();
+        const nowIso = new Date().toISOString();
+        const info = insCluster.run(v.title, refineCategory(v.title, c.category || ''), stamps[0] || nowIso, fetched[fetched.length - 1] || nowIso);
+        const newId = Number(info.lastInsertRowid);
+        moveVersion.run(newId, v.id);
+        moveArticles.run(newId, v.id);
+        affected.add(c.id);
+        affected.add(newId);
+        split++;
+      }
+    }
+    for (const id of affected) updateScore.run(importanceFor(db, id), id);
+    db.exec('COMMIT');
+  } catch (e) { try { db.exec('ROLLBACK'); } catch {} throw e; }
+  return split;
+}
+
 /* ---------- 保存済み社説の再評価 ---------- */
 
 /**
@@ -197,8 +269,8 @@ export function reevaluateEditorials(db) {
 }
 
 /**
- * refresh 時に行うライフサイクル一式: 閲覧集計 → prune → fetch_runs 整理 → 本文の後がけ → 署名の後がけ → 社説の再評価 → 自動 VACUUM 判定。
- * 戻り値: { prunedClusters, foldedReads, refilteredBodies, backfilledAuthors, reevaluatedEditorials, vacuumed }
+ * refresh 時に行うライフサイクル一式: 閲覧集計 → prune → fetch_runs 整理 → 本文の後がけ → 署名の後がけ → 過剰統合の分離 → 社説の再評価 → 自動 VACUUM 判定。
+ * 戻り値: { prunedClusters, foldedReads, refilteredBodies, backfilledAuthors, splitClusters, reevaluatedEditorials, vacuumed }
  */
 export function runLifecycle(db, now = new Date()) {
   const foldedReads = foldOldReadEvents(db, now);
@@ -206,7 +278,8 @@ export function runLifecycle(db, now = new Date()) {
   pruneFetchRuns(db);
   const refilteredBodies = refilterBodies(db);
   const backfilledAuthors = backfillAuthors(db);
+  const splitClusters = splitOverMergedClusters(db);
   const reevaluatedEditorials = reevaluateEditorials(db);
   const vacuumed = vacuumIfNeeded(db);
-  return { prunedClusters, foldedReads, refilteredBodies, backfilledAuthors, reevaluatedEditorials, vacuumed };
+  return { prunedClusters, foldedReads, refilteredBodies, backfilledAuthors, splitClusters, reevaluatedEditorials, vacuumed };
 }

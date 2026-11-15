@@ -106,6 +106,29 @@ function insertEditorial(db, clusterId, paper, title) {
     .run(clusterId, paper, title, '概要', 'https://example.com/ed', new Date().toISOString());
 }
 
+test('再評価の実例回帰: 過剰統合した車いすマラソンクラスタに付いた無関係な社説は全て降格される', () => {
+  // ユーザー実機の実例: 車いすマラソンのクラスタが首相動静などの記事を吸い込み、
+  // その記事見出しとの語の一致で5紙すべての社説が found になっていた（全てマラソンと無関係）。
+  // クラスタタイトル（車いすマラソン）と強い語を共有しない社説は降格されるはず。
+  const db = openDb(':memory:');
+  const heads = [
+    '大分国際車いすマラソン 選手が力走',
+    '高市首相動静 2026年11月6日～8日',
+    '熊本地震の復興基金に520億円 高市首相が表明',
+    '外国人との共生社会を考える 福井市でフォーラム',
+    '原爆投下『国際法違反』 ソウルの民衆法廷、米国に謝罪と賠償求める',
+  ];
+  const id = makeCluster(db, '大分国際車いすマラソン 選手が力走', heads);
+  insertEditorial(db, id, '朝日', '（社説）労働基準法の改正 働き方の多様化に対応を');
+  insertEditorial(db, id, '日経', '［社説］高市首相は改造内閣で幅広い信認めざせ');
+  insertEditorial(db, id, '毎日', '社説：高市首相就任1年 独善の限界が見えてきた');
+  insertEditorial(db, id, '産経', '＜主張＞フアンCEO辞任 ガバナンスの立て直し急げ 社説');
+  insertEditorial(db, id, '読売', '社説：日本語学校 外国人教育の充実が急務だ');
+  const demoted = reevaluateEditorials(db);
+  assert.equal(demoted, 5, '5紙分すべて降格される');
+  assert.equal(db.prepare('SELECT COUNT(*) c FROM editorials WHERE cluster_id = ? AND found = 1').get(id).c, 0);
+});
+
 test('再評価: 誤った found は降格され、正例は残り、重要度が再計算される', () => {
   const db = openDb(':memory:');
   const bad = makeCluster(db, MARATHON_TITLE, MARATHON_HEADS);

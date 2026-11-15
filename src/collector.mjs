@@ -402,6 +402,36 @@ score += Math.min(editorialCount * 6, 18);
 return score;
 }
 
+/** 「記事でないアイテム」のタイトルパターン（サイト説明文・案内ページ等）。 */
+const GARBAGE_TITLE_PATTERNS = [
+  /が運営する(ニュース)?サイト/, // 例: 「時事ドットコム：時事通信社が運営するニュースサイト」
+  /の公式(サイト|ホームページ)(です|へようこそ)/,
+];
+
+/**
+* 記事でないアイテム（サイトの説明文・放送/配信の案内ページ・日付の異常なアイテム）を
+* 取り込み段階で弾くための判定。実例: 時事ドットコムのサイト説明文（日付が数か月前）が
+* ニュースクラスタの v1 になっていた、放送案内ページの見出しに「~!@」等のゴミが混入していた。
+*/
+export function isGarbageItem(item, now = new Date()) {
+  const title = String(item?.title || '');
+  if (GARBAGE_TITLE_PATTERNS.some((re) => re.test(title))) return true;
+  // 記号のゴミ: 見出しに ASCII 記号が2つ以上混じるものは案内ページ等の抽出ミスとみなす
+  // （「支持率30%」のように正当な見出しで1つだけ出る記号は許容する）
+  const symbols = title.match(/[~!@#$%^*\\|<>]/g);
+  if (symbols && symbols.length >= 2) return true;
+  // 日付の異常: 公開が14日以上前、または3日以上先のアイテムはニュースとして扱わない
+  if (item?.publishedAt) {
+    const ms = Date.parse(item.publishedAt);
+    if (Number.isFinite(ms)) {
+      const nowMs = now.getTime();
+      if (nowMs - ms > 14 * 24 * 3600000) return true;
+      if (ms - nowMs > 3 * 24 * 3600000) return true;
+    }
+  }
+  return false;
+}
+
 /**
 * 記事配列をDBに取り込む。fetchに依存しない純粋な取り込み処理（テスト可能）。
 * 戻り値: { seen, inserted}
@@ -421,37 +451,67 @@ const items = [...rawItems].sort((a, b) => String(a.publishedAt || '').localeCom
 let inserted = 0;
 const existsUrl = db.prepare('SELECT id FROM articles WHERE url = ?');
 // クラスタ照合のメモ化: クラスタ標題と所属記事タイトルのバイグラム（汎用語除去済み）、
-// 概要の語彙集合、最終出現時刻を一度だけ計算する
-const clusterCache = new Map(); // id -> { titleBg, articleBgs: [Set], summaryWords: Set, lastSeenMs }
-for (const c of db.prepare('SELECT id, title, last_seen_at FROM clusters').all()) {
-  clusterCache.set(c.id, { titleBg: filterWeakBigrams(bigrams(c.title)), articleBgs: [], summaryWords: new Set(), lastSeenMs: Date.parse(c.last_seen_at) || 0 });
+// 概要の語彙集合、出現時刻、強い語の集合を一度だけ計算する
+const clusterCache = new Map(); // id -> { titleBg, articleBgs, summaryWords, lastSeenMs, firstSeenMs, allStrong, allProper }
+for (const c of db.prepare('SELECT id, title, last_seen_at, first_seen_at FROM clusters').all()) {
+  clusterCache.set(c.id, {
+    titleBg: filterWeakBigrams(bigrams(c.title)), articleBgs: [], summaryWords: new Set(),
+    lastSeenMs: Date.parse(c.last_seen_at) || 0, firstSeenMs: Date.parse(c.first_seen_at) || 0,
+    allStrong: strongTerms(c.title), allProper: properTerms(c.title),
+  });
 }
 for (const a of db.prepare('SELECT cluster_id, title, summary FROM articles').all()) {
   const entry = clusterCache.get(a.cluster_id);
   if (!entry) continue;
   entry.articleBgs.push(filterWeakBigrams(bigrams(cleanTitle(a.title, ''))));
   for (const w of summaryWords(a.summary)) entry.summaryWords.add(w);
+  for (const w of strongTerms(a.title)) entry.allStrong.add(w);
+  for (const w of properTerms(a.title)) entry.allProper.add(w);
 }
 const versionTitlesStmt = db.prepare('SELECT title FROM versions WHERE cluster_id = ? ORDER BY version_no');
 for (const raw of items) {
 if (!raw.url || !raw.title) continue;
+if (isGarbageItem(raw, now)) continue;
 if (existsUrl.get(raw.url)) continue;
 const source = normalizeSource(raw.source || extractSourceFromTitle(raw.title));
 const title = cleanTitle(raw.title, source);
 const titleBg = filterWeakBigrams(bigrams(title));
 const itemSummaryWords = summaryWords(raw.summary);
+const itemStrong = strongTerms(title);
+const itemProper = properTerms(title);
 const itemMs = Date.parse(raw.publishedAt || nowIso) || now.getTime();
 let best = null;
 for (const [cid, entry] of clusterCache) {
   // 照合対象は直近のクラスタに限る（古い出来事との誤合体と計算量を抑える）
   if (entry.lastSeenMs && Math.abs(itemMs - entry.lastSeenMs) > CLUSTER_WINDOW_MS) continue;
-  let maxSim = matchScore(titleBg, entry.titleBg);
-  for (const bg of entry.articleBgs) maxSim = Math.max(maxSim, matchScore(titleBg, bg));
+  // 時間窓は first_seen 起点でも制限する。last_seen 基準だけだと、記事を吸い込むたびに
+  // 窓が延び続け、数日〜1週間にわたって無関係な記事を吸い込み続ける（連鎖統合の温床）。
+  if (entry.firstSeenMs && itemMs - entry.firstSeenMs > CLUSTER_WINDOW_MS) continue;
+  // 主判定: クラスタタイトルとの一致を基本とする。タイトルと合わない場合は、所属記事の
+  // 複数と強く一致する場合（裏付けがある場合）に限って同一視する。「いずれか1記事との
+  // 最大類似」だけで判定すると、大きなクラスタほど1件の偶然の類似で別ニュースを吸い込み、
+  // 吸い込んだ記事が次の吸収の足がかりになる（連鎖的過剰統合）。
+  const simTitle = matchScore(titleBg, entry.titleBg);
+  let bestArticleSim = 0;
+  let articleHits = 0;
+  for (const bg of entry.articleBgs) {
+    const s = matchScore(titleBg, bg);
+    if (s > bestArticleSim) bestArticleSim = s;
+    if (s >= CLUSTER_THRESHOLD) articleHits++;
+  }
+  let maxSim = 0;
+  if (simTitle >= CLUSTER_THRESHOLD) maxSim = Math.max(simTitle, bestArticleSim);
+  else if (bestArticleSim >= 0.5 && articleHits >= 2) maxSim = bestArticleSim;
   if (maxSim === 0) {
-    // 見出しバイグラムで届かない場合の補助: 弱い見出し類似（生Jaccard）＋概要の特徴語共有が両方あれば同一視する
+    // 補助経路: 見出しの弱い類似＋概要の特徴語共有。テーマだけ似た別ニュース（例: 別の会社の
+    // 情報漏えい）を拾わないよう、閾値を引き上げ、固有名詞っぽい強い語の共有を必須にする。
     let graded = jaccard(titleBg, entry.titleBg);
     for (const bg of entry.articleBgs) graded = Math.max(graded, jaccard(titleBg, bg));
-    if (graded >= 0.12 && sharedCount(itemSummaryWords, entry.summaryWords) >= 3) maxSim = CLUSTER_THRESHOLD;
+    const strongShared = sharedCount(itemStrong, entry.allStrong);
+    const properShared = sharedCount(itemProper, entry.allProper);
+    if (graded >= 0.2 && sharedCount(itemSummaryWords, entry.summaryWords) >= 4 && (properShared >= 1 || strongShared >= 2)) {
+      maxSim = CLUSTER_THRESHOLD;
+    }
   }
   if (!best || maxSim > best.sim) best = { id: cid, sim: maxSim };
 }
@@ -472,7 +532,7 @@ const info = db.prepare('INSERT INTO clusters (title, category, first_seen_at, l
 clusterId = Number(info.lastInsertRowid);
 const v = db.prepare('INSERT INTO versions (cluster_id, version_no, title, created_at) VALUES (?, 1, ?, ?)').run(clusterId, title, nowIso);
 versionId = Number(v.lastInsertRowid);
-clusterCache.set(clusterId, { titleBg, articleBgs: [], summaryWords: new Set(), lastSeenMs: now.getTime() });
+clusterCache.set(clusterId, { titleBg, articleBgs: [], summaryWords: new Set(), lastSeenMs: now.getTime(), firstSeenMs: Date.parse(raw.publishedAt || nowIso) || now.getTime(), allStrong: new Set(itemStrong), allProper: new Set(itemProper) });
 }
 // 同一記事が「ラッパーURL」と「直接URL」の両方で届いた場合は直接URL側を残す
 // （ラッパーURLでは本文取得ができないため）。同一媒体・同一版・見出しがほぼ同一のものを同一記事とみなす。
@@ -503,6 +563,8 @@ const entry = clusterCache.get(clusterId);
 if (entry) {
   entry.articleBgs.push(titleBg);
   for (const w of itemSummaryWords) entry.summaryWords.add(w);
+  for (const w of itemStrong) entry.allStrong.add(w);
+  for (const w of itemProper) entry.allProper.add(w);
   entry.lastSeenMs = Math.max(entry.lastSeenMs || 0, itemMs);
 }
 inserted++;
@@ -720,6 +782,22 @@ const s = m[0];
 for (let i = 0; i + 3 <= s.length; i++) terms.add(s.slice(i, i + 3));
 }
 for (const g of GENERIC_TERMS) terms.delete(g);
+return terms;
+}
+
+/**
+* 「固有名詞っぽい強い語」: カタカナ3字以上（3字窓）と英字3字以上。
+* 会社名・人名・製品名など、外来語や固有名詞はこの形になることが多い。
+* テーマだけ似た別ニュースとの照合を避けるためのアンカーとして使う。
+*/
+export function properTerms(text) {
+const terms = new Set();
+const t = String(text || '');
+for (const m of t.matchAll(/[ァ-ヶー]{3,}/g)) {
+const s = m[0];
+for (let i = 0; i + 3 <= s.length; i++) terms.add(s.slice(i, i + 3));
+}
+for (const m of t.matchAll(/[A-Za-z][A-Za-z0-9]{2,}/g)) terms.add(m[0]);
 return terms;
 }
 

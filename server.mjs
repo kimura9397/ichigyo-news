@@ -10,7 +10,7 @@ import { fileURLToPath } from 'node:url';
 import { openDb } from './src/db.mjs';
 import { refresh, fetchEditorials, checkTopEditorials } from './src/collector.mjs';
 import { fetchClusterBodies, fetchTopImages } from './src/body.mjs';
-import { addBookmark, removeBookmark, isBookmarked, recordRead, foldOldReadEvents, pruneOldClusters, pruneFetchRuns, refilterBodies, backfillAuthors, reevaluateEditorials } from './src/lifecycle.mjs';
+import { addBookmark, removeBookmark, isBookmarked, recordRead, foldOldReadEvents, pruneOldClusters, pruneFetchRuns, refilterBodies, backfillAuthors, splitOverMergedClusters, reevaluateEditorials } from './src/lifecycle.mjs';
 
 const ROOT = dirname(fileURLToPath(import.meta.url));
 const PUBLIC_DIR = join(ROOT, 'public');
@@ -341,16 +341,17 @@ const server = createServer(async (req, res) => {
       return recordRead(db, id) ? sendJson(res, 200, { ok: true }) : sendJson(res, 404, { error: 'not found' });
     }
     if (p === '/api/maintenance' && req.method === 'POST') {
-      // 手動整理: 保持期間 prune ＋ 閲覧集計 ＋ fetch_runs 整理 ＋ 本文ノイズ除去の後がけ ＋ 記者署名の後がけ ＋ 社説の再評価 ＋ VACUUM（強制）。前後の容量を返す
+      // 手動整理: 保持期間 prune ＋ 閲覧集計 ＋ fetch_runs 整理 ＋ 本文ノイズ除去の後がけ ＋ 記者署名の後がけ ＋ 過剰統合の分離 ＋ 社説の再評価 ＋ VACUUM（強制）。前後の容量を返す
       const before = dbBytes();
       const foldedReads = foldOldReadEvents(db);
       const prunedClusters = pruneOldClusters(db);
       pruneFetchRuns(db);
       const refilteredBodies = refilterBodies(db);
       const backfilledAuthors = backfillAuthors(db);
+      const splitClusters = splitOverMergedClusters(db);
       const reevaluatedEditorials = reevaluateEditorials(db);
       db.exec('VACUUM');
-      return sendJson(res, 200, { pruned_clusters: prunedClusters, folded_reads: foldedReads, refiltered_bodies: refilteredBodies, backfilled_authors: backfilledAuthors, reevaluated_editorials: reevaluatedEditorials, before_bytes: before, after_bytes: dbBytes() });
+      return sendJson(res, 200, { pruned_clusters: prunedClusters, folded_reads: foldedReads, refiltered_bodies: refilteredBodies, backfilled_authors: backfilledAuthors, split_clusters: splitClusters, reevaluated_editorials: reevaluatedEditorials, before_bytes: before, after_bytes: dbBytes() });
     }
     if (p === '/api/status' && req.method === 'GET') {
       const counts = db.prepare('SELECT (SELECT COUNT(*) FROM clusters) AS clusters, (SELECT COUNT(*) FROM versions) AS versions, (SELECT COUNT(*) FROM articles) AS articles').get();
