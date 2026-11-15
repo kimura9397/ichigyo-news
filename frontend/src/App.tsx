@@ -11,16 +11,19 @@ import {
 } from 'react'
 import {
   addBookmark,
+  addKeywordRemote,
   applyEditorials,
   fetchClusterBodies,
   fetchClusterDetail,
   fetchDbStatus,
   fetchEditorials,
+  fetchKeywords,
   fetchTabRows,
   outletOf,
   postReadEvent,
   refreshFeed,
   removeBookmark,
+  removeKeywordRemote,
   runMaintenance,
   versionsOfEvent,
 } from './api'
@@ -340,21 +343,11 @@ function App() {
     }
   }, [menuOpen])
 
-  // キーワードウォッチ（2026-11-15 ユーザー決定）。キーワードは localStorage に保存する
-  const [keywords, setKeywords] = useState<string[]>(() => {
-    try {
-      const v: unknown = JSON.parse(
-        localStorage.getItem('ichigyo:keywords') || '[]',
-      )
-      return Array.isArray(v)
-        ? v.filter(
-            (k): k is string => typeof k === 'string' && k.trim().length > 0,
-          )
-        : []
-    } catch {
-      return []
-    }
-  })
+  // キーワードウォッチ（2026-11-15 ユーザー決定）。キーワードはサーバー側（DB）に保存する
+  // （照合条件であると同時に、更新時の収集クエリでもあるため）。
+  // 移行措置: 初回読み込み時にサーバー側が空で localStorage に旧キーワードがあれば
+  // アップロードして引き継ぎ、ローカル側は消す。
+  const [keywords, setKeywords] = useState<string[]>([])
   /** ウォッチビューで選択中のキーワード（null は「すべて」= 全キーワードの OR） */
   const [watchKeyword, setWatchKeyword] = useState<string | null>(null)
   const [keywordInput, setKeywordInput] = useState('')
@@ -363,12 +356,49 @@ function App() {
 
   useEffect(() => {
     keywordsRef.current = keywords
-    try {
-      localStorage.setItem('ichigyo:keywords', JSON.stringify(keywords))
-    } catch {
-      /* 保存できなくても動作は続ける */
-    }
   }, [keywords])
+
+  useEffect(() => {
+    let cancelled = false
+    void (async () => {
+      try {
+        let serverKeywords = await fetchKeywords()
+        if (serverKeywords.length === 0) {
+          let local: string[] = []
+          try {
+            const v: unknown = JSON.parse(
+              localStorage.getItem('ichigyo:keywords') || '[]',
+            )
+            if (Array.isArray(v)) {
+              local = v.filter(
+                (k): k is string => typeof k === 'string' && k.trim().length > 0,
+              )
+            }
+          } catch {
+            local = []
+          }
+          for (const kw of local) {
+            try {
+              serverKeywords = await addKeywordRemote(kw)
+            } catch {
+              /* 上限など個別の失敗は飛ばして残りを引き継ぐ */
+            }
+          }
+        }
+        try {
+          localStorage.removeItem('ichigyo:keywords')
+        } catch {
+          /* 消せなくても動作は続ける */
+        }
+        if (!cancelled) setKeywords(serverKeywords)
+      } catch {
+        /* 取得できなくても画面は続ける（キーワードなしとして扱う） */
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [])
 
   useEffect(() => {
     watchKeywordRef.current = watchKeyword
@@ -385,19 +415,35 @@ function App() {
     })
   }
 
-  /** キーワードを登録する（カンマは区切りと衝突するので空白に置換、重複は追加しない）。追加できたら true。 */
-  function addKeyword(raw: string): boolean {
+  /** キーワードをサーバーに登録する（カンマは区切りと衝突するので空白に置換、重複は追加しない）。追加できたら true。 */
+  async function addKeyword(raw: string): Promise<boolean> {
     const kw = raw.replace(/,/g, ' ').trim().replace(/\s+/g, ' ')
     if (!kw || keywordsRef.current.includes(kw)) return false
-    setKeywords((prev) => [...prev, kw])
-    clearWatchPages()
-    return true
+    try {
+      const next = await addKeywordRemote(kw)
+      setKeywords(next)
+      clearWatchPages()
+      return next.includes(kw)
+    } catch {
+      return false
+    }
   }
 
   function removeKeyword(kw: string) {
     setKeywords((prev) => prev.filter((k) => k !== kw))
     if (watchKeywordRef.current === kw) setWatchKeyword(null)
     clearWatchPages()
+    void (async () => {
+      try {
+        setKeywords(await removeKeywordRemote(kw))
+      } catch {
+        try {
+          setKeywords(await fetchKeywords())
+        } catch {
+          /* 復旧できなくても画面は続ける */
+        }
+      }
+    })()
   }
 
   function selectWatchKeyword(kw: string | null) {
@@ -431,9 +477,9 @@ function App() {
   }
 
   /** 検索中の語をウォッチのキーワードに登録し、結果をトーストで知らせる。 */
-  function registerSearchKeyword() {
+  async function registerSearchKeyword() {
     if (!searchQuery) return
-    if (addKeyword(searchQuery)) {
+    if (await addKeyword(searchQuery)) {
       setToast(`「${searchQuery}」をキーワードウォッチに登録しました`)
     } else {
       setToast(`「${searchQuery}」はすでに登録されています`)
@@ -1305,13 +1351,15 @@ function App() {
                   <section className="menu-section">
                     <h3>キーワードウォッチ</h3>
                     <p className="menu-note">
-                      登録したキーワードを含むニュースだけを、タブ行のキーワードボタンから見られます。一致はクラスタと記事の見出し・要約が対象で、本文は含みません。
+                      登録したキーワードを含むニュースだけを、タブ行のキーワードボタンから見られます。一致は見出し・要約・取得済みの本文が対象で、表記ゆれ（漏洩／漏えい等）も吸収します。キーワードはサーバーに保存され、更新のたびにそのキーワードのニュースも自動で集めます。
                     </p>
                     <form
                       className="kw-form"
                       onSubmit={(e) => {
                         e.preventDefault()
-                        if (addKeyword(keywordInput)) setKeywordInput('')
+                        void (async () => {
+                          if (await addKeyword(keywordInput)) setKeywordInput('')
+                        })()
                       }}
                     >
                       <input

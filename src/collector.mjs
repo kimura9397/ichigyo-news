@@ -5,6 +5,7 @@
 import { openDb} from './db.mjs';
 import { runLifecycle } from './lifecycle.mjs';
 import { normalizeForSearch, buildArticleSearchText } from './normalize.mjs';
+import { listKeywords } from './keywords.mjs';
 
 export const PAPERS = ['朝日', '毎日', '読売', '産経', '日経'];
 
@@ -590,23 +591,43 @@ clearTimeout(timer);
 // 保持期間（prune）・閲覧集計・VACUUM は src/lifecycle.mjs に分離した
 // （2026-11-15 決定: 保持は最終確認から7日、ブックマーク済みは免除）。
 
+/** キーワード1件あたりの取り込み上限（キーワードフィードは検索結果なので新しい順にこの件数まで）。 */
+export const KEYWORD_FEED_LIMIT = 30;
+
+/** 登録キーワードの収集フィード（Google News キーワード検索RSS）。 */
+export function keywordFeedFor(keyword) {
+return {
+name: `キーワード「${keyword}」`,
+source: '',
+category: '',
+url: `https://news.google.com/rss/search?q=${encodeURIComponent(keyword)}&hl=ja&gl=JP&ceid=JP:ja`,
+limit: KEYWORD_FEED_LIMIT,
+};
+}
+
 /** 全フィードを取得してDBに取り込む。失敗したフィードはスキップする。 */
 export async function refresh(db, { fetchImpl = fetch, feeds = FEEDS} = {}) {
 const started = new Date();
 const run = db.prepare('INSERT INTO fetch_runs (started_at) VALUES (?)').run(started.toISOString());
 let ok = 0, failed = 0;
+// 登録キーワードのフィードも通常フィードと一緒に取得する（キーワードは照合条件であると
+// 同時に収集クエリでもある、2026-11-15 ユーザー決定）。キーワードフィードの失敗は
+// 他フィードと同じくスキップ扱いで、更新全体は失敗させない。件数も fetch_runs に合算する。
+const effectiveFeeds = [...feeds, ...listKeywords(db).map(keywordFeedFor)];
 // 全フィードのアイテムを集めてから一括で取り込む（取り込み側のクラスタ照合キャッシュ構築を
 // フィードごとに繰り返すと、DBが育つほど遅くなるため）
 const allItems = [];
 const BATCH = 8;
-for (let i = 0; i < feeds.length; i += BATCH) {
-const results = await Promise.allSettled(feeds.slice(i, i + BATCH).map((f) => fetchFeed(f, fetchImpl)));
-for (const r of results) {
+for (let i = 0; i < effectiveFeeds.length; i += BATCH) {
+const batch = effectiveFeeds.slice(i, i + BATCH);
+const results = await Promise.allSettled(batch.map((f) => fetchFeed(f, fetchImpl)));
+results.forEach((r, j) => {
 if (r.status === 'fulfilled') {
 ok++;
-allItems.push(...r.value);
+const items = batch[j].limit ? r.value.slice(0, batch[j].limit) : r.value;
+allItems.push(...items);
 } else { failed++; console.error('feed failed:', r.reason?.message || r.reason); }
-}
+});
 }
 const { seen, inserted } = ingestArticles(db, allItems);
 const { prunedClusters: pruned } = runLifecycle(db);

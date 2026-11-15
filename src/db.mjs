@@ -66,6 +66,13 @@ CREATE TABLE IF NOT EXISTS bookmarks (
   cluster_id INTEGER PRIMARY KEY REFERENCES clusters(id),
   created_at TEXT NOT NULL
 );
+-- キーワードウォッチの登録キーワード（2026-11-15 サーバー側へ移行）:
+-- 照合条件であると同時に、更新時の収集クエリ（Google News キーワード検索RSS）でもある
+CREATE TABLE IF NOT EXISTS watch_keywords (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  keyword TEXT NOT NULL UNIQUE,
+  created_at TEXT NOT NULL
+);
 -- 閲覧ログ（生イベント）: 詳細を開いた記録。30日より古いものは read_daily へ集計して削除する
 CREATE TABLE IF NOT EXISTS read_events (
   id INTEGER PRIMARY KEY AUTOINCREMENT,

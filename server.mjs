@@ -12,6 +12,7 @@ import { refresh, fetchEditorials, checkTopEditorials } from './src/collector.mj
 import { fetchClusterBodies, fetchTopImages } from './src/body.mjs';
 import { addBookmark, removeBookmark, isBookmarked, recordRead, foldOldReadEvents, pruneOldClusters, pruneFetchRuns, refilterBodies, backfillAuthors, splitOverMergedClusters, reevaluateEditorials, refreshSearchText } from './src/lifecycle.mjs';
 import { normalizeForSearch } from './src/normalize.mjs';
+import { listKeywords, addKeyword as addKeywordToDb, removeKeyword as removeKeywordFromDb } from './src/keywords.mjs';
 
 const ROOT = dirname(fileURLToPath(import.meta.url));
 const PUBLIC_DIR = join(ROOT, 'public');
@@ -279,6 +280,19 @@ const SECURITY_HEADERS = {
   'content-security-policy': "frame-ancestors 'none'",
 };
 
+/** リクエストの JSON ボディを読む（壊れた JSON や空ボディは {} として扱う）。 */
+async function readJsonBody(req) {
+  const chunks = [];
+  for await (const chunk of req) chunks.push(chunk);
+  if (chunks.length === 0) return {};
+  try {
+    const parsed = JSON.parse(Buffer.concat(chunks).toString('utf8'));
+    return parsed && typeof parsed === 'object' ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
 function sendJson(res, status, data) {
   res.writeHead(status, { 'content-type': 'application/json; charset=utf-8', ...SECURITY_HEADERS });
   res.end(JSON.stringify(data));
@@ -341,6 +355,20 @@ const server = createServer(async (req, res) => {
     if (bookmarkMatch && req.method === 'DELETE') {
       removeBookmark(db, Number(bookmarkMatch[1]));
       return sendJson(res, 200, { bookmarked: false });
+    }
+    if (p === '/api/keywords' && req.method === 'GET') {
+      return sendJson(res, 200, { keywords: listKeywords(db) });
+    }
+    if (p === '/api/keywords' && req.method === 'POST') {
+      const body = await readJsonBody(req);
+      const result = addKeywordToDb(db, body.keyword);
+      if (result.error) return sendJson(res, 400, { error: result.error, keywords: result.keywords });
+      return sendJson(res, 200, { keywords: result.keywords, added: result.added });
+    }
+    if (p === '/api/keywords' && req.method === 'DELETE') {
+      const body = await readJsonBody(req);
+      const result = removeKeywordFromDb(db, body.keyword);
+      return sendJson(res, 200, { keywords: result.keywords, removed: result.removed });
     }
     const readMatch = p.match(/^\/api\/read\/(\d+)$/);
     if (readMatch && req.method === 'POST') {

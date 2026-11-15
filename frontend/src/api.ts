@@ -585,6 +585,34 @@ export async function removeBookmark(clusterId: number): Promise<void> {
   await fetchJson(`/api/bookmarks/${clusterId}`, { method: 'DELETE' })
 }
 
+/* ---------- キーワードウォッチ（サーバー側保存） ---------- */
+
+/** 登録キーワードをサーバーから取得する。 */
+export async function fetchKeywords(): Promise<string[]> {
+  const data = await fetchJson<{ keywords?: string[] }>('/api/keywords')
+  return data.keywords ?? []
+}
+
+/** キーワードをサーバーに登録し、登録後の全件を返す。 */
+export async function addKeywordRemote(keyword: string): Promise<string[]> {
+  const data = await fetchJson<{ keywords?: string[] }>('/api/keywords', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ keyword }),
+  })
+  return data.keywords ?? []
+}
+
+/** キーワードをサーバーから削除し、削除後の全件を返す。 */
+export async function removeKeywordRemote(keyword: string): Promise<string[]> {
+  const data = await fetchJson<{ keywords?: string[] }>('/api/keywords', {
+    method: 'DELETE',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ keyword }),
+  })
+  return data.keywords ?? []
+}
+
 /** 閲覧ログを1件送る（fire-and-forget: 失敗しても画面は止めない）。 */
 export function postReadEvent(clusterId: number): void {
   void fetch(`/api/read/${clusterId}`, { method: 'POST' }).catch(() => {})
