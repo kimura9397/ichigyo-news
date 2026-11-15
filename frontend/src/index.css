@@ -105,7 +105,7 @@ button:focus-visible {
 
 /* アクセント色（2026-11-15 ユーザー決定）: 既定は朱。設定メニューで用意した色見本から
    選ぶと <html data-accent> が切り替わり、--vermillion が差し替わる（アプリ内UIのみ）。
-   favicon はブランドとして朱に固定で、アクセント変更の対象外。
+   favicon はブランド色（紙色＋墨）に固定で、アクセント変更の対象外。
    各色はライト/ダーク両方でコントラスト基準（test/theme-contrast.test.mjs）を満たす値にする。 */
 :root[data-accent='ai'] {
   --vermillion: #1d4e89;
