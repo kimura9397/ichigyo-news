@@ -33,7 +33,7 @@
 .masthead-note {
   margin: 0;
   max-width: 19rem;
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale));
   color: var(--muted);
   text-align: end;
 }
@@ -83,7 +83,7 @@
 .bookmark-nav.is-active {
   color: var(--vermillion);
   border-color: var(--vermillion);
-  background: color-mix(in srgb, var(--vermillion) 10%, white);
+  background: color-mix(in srgb, var(--vermillion) 10%, var(--tint-base));
 }
 
 .bookmark-count {
@@ -94,7 +94,7 @@
 
 .tab span {
   display: block;
-  font-size: 16px;
+  font-size: calc(16px * var(--font-scale));
   font-weight: 650;
   color: var(--ink);
 }
@@ -139,7 +139,7 @@
 .list-pane {
   border-inline-end: 1px solid var(--line);
   overflow: auto;
-  background: color-mix(in srgb, var(--paper) 70%, white);
+  background: color-mix(in srgb, var(--paper) 70%, var(--tint-base));
 }
 
 .list-pane ul {
@@ -161,7 +161,7 @@
 }
 
 .row:hover {
-  background: color-mix(in srgb, var(--vermillion) 6%, white);
+  background: color-mix(in srgb, var(--vermillion) 6%, var(--tint-base));
 }
 
 .row.is-active {
@@ -194,7 +194,7 @@
 .row-lead,
 .detail-lead {
   margin: 0;
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale));
   color: var(--muted);
 }
 
@@ -227,12 +227,12 @@
 
 .badge.important {
   color: var(--vermillion);
-  background: color-mix(in srgb, var(--vermillion) 12%, white);
+  background: color-mix(in srgb, var(--vermillion) 12%, var(--tint-base));
 }
 
 .badge.fresh {
   color: var(--fresh);
-  background: color-mix(in srgb, var(--fresh) 12%, white);
+  background: color-mix(in srgb, var(--fresh) 12%, var(--tint-base));
 }
 
 .detail-pane {
@@ -248,7 +248,7 @@
   gap: 4px;
   margin-bottom: 14px;
   border: 1px solid var(--line);
-  background: white;
+  background: var(--paper);
   color: var(--ink);
   cursor: pointer;
   font: inherit;
@@ -278,7 +278,7 @@
 .bookmark-btn {
   appearance: none;
   border: 1px solid var(--line);
-  background: white;
+  background: var(--paper);
   color: var(--ink);
   cursor: pointer;
   font: inherit;
@@ -291,13 +291,6 @@
   border-color: var(--ink);
   background: var(--ink);
   color: var(--paper);
-}
-
-.db-size {
-  font-size: 11.5px;
-  color: var(--muted);
-  white-space: nowrap;
-  padding-inline-start: 6px;
 }
 
 .version-rail {
@@ -313,7 +306,7 @@
 .kind {
   appearance: none;
   border: 1px solid var(--line);
-  background: white;
+  background: var(--paper);
   color: var(--ink);
   cursor: pointer;
   font: inherit;
@@ -345,7 +338,7 @@
 .kind {
   padding: 8px 12px;
   border-radius: 4px;
-  font-size: 13px;
+  font-size: calc(13px * var(--font-scale));
 }
 
 .kind-bar {
@@ -380,7 +373,7 @@
 .paper-body {
   margin: 0;
   max-width: 42em;
-  font-size: 16px;
+  font-size: calc(16px * var(--font-scale));
   line-height: 1.9;
   color: var(--ink);
 }
@@ -477,13 +470,6 @@
   gap: 8px;
 }
 
-.db-set {
-  gap: 2px;
-  padding: 2px;
-  border-radius: 999px;
-  background: color-mix(in srgb, var(--ink) 6%, transparent);
-}
-
 .icon-btn {
   appearance: none;
   display: inline-flex;
@@ -499,16 +485,8 @@
   cursor: pointer;
 }
 
-.db-set .icon-btn {
-  background: transparent;
-}
-
 .icon-btn:hover:not(:disabled) {
   background: color-mix(in srgb, var(--ink) 13%, transparent);
-}
-
-.db-set .icon-btn:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--ink) 10%, transparent);
 }
 
 .icon-btn:disabled {
@@ -546,7 +524,7 @@
   width: 36px;
   height: 20px;
   border-radius: 999px;
-  background: color-mix(in srgb, var(--ink) 20%, white);
+  background: color-mix(in srgb, var(--ink) 20%, var(--tint-base));
   transition: background 0.15s ease;
 }
 
@@ -571,7 +549,7 @@
 }
 
 .switch-label {
-  font-size: 13px;
+  font-size: calc(13px * var(--font-scale));
   font-weight: 650;
   white-space: nowrap;
 }
@@ -699,7 +677,7 @@
 
 .poll-progress {
   height: 3px;
-  background: color-mix(in srgb, var(--line) 55%, white);
+  background: color-mix(in srgb, var(--line) 55%, var(--tint-base));
 }
 
 .poll-progress-bar {
@@ -709,17 +687,17 @@
 }
 
 .row.is-new {
-  background: color-mix(in srgb, var(--vermillion) 10%, white);
+  background: color-mix(in srgb, var(--vermillion) 10%, var(--tint-base));
   animation: row-new-pulse 1.6s ease-in-out 3;
 }
 
 @keyframes row-new-pulse {
   0%,
   100% {
-    background: color-mix(in srgb, var(--vermillion) 6%, white);
+    background: color-mix(in srgb, var(--vermillion) 6%, var(--tint-base));
   }
   50% {
-    background: color-mix(in srgb, var(--vermillion) 24%, white);
+    background: color-mix(in srgb, var(--vermillion) 24%, var(--tint-base));
   }
 }
 
@@ -776,11 +754,11 @@
 .cat-chip {
   appearance: none;
   border: 1px solid var(--line);
-  background: white;
+  background: var(--paper);
   color: var(--ink);
   cursor: pointer;
   font: inherit;
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale));
   padding: 5px 10px;
   border-radius: 999px;
   white-space: nowrap;
@@ -839,7 +817,7 @@
 
 .badge.body {
   color: var(--fresh);
-  background: color-mix(in srgb, var(--fresh) 14%, white);
+  background: color-mix(in srgb, var(--fresh) 14%, var(--tint-base));
 }
 
 .body-badge {
@@ -878,5 +856,99 @@
   object-fit: cover;
   border-radius: 4px;
   margin-top: 2px;
-  background: color-mix(in srgb, var(--line) 45%, white);
+  background: color-mix(in srgb, var(--line) 45%, var(--tint-base));
+}
+
+/* --- 設定メニュー（ハンバーガー）と既読の薄表示 --- */
+
+/* 既読を薄く表示する設定が ON のとき、詳細を開いたクラスタの行を薄くする */
+.row.is-read {
+  opacity: 0.52;
+}
+
+.menu-wrap {
+  position: relative;
+}
+
+.menu-panel {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 8px);
+  z-index: 45;
+  width: min(320px, calc(100vw - 24px));
+  max-height: min(72vh, 600px);
+  overflow: auto;
+  padding: 4px 16px 12px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--paper);
+  box-shadow: var(--shadow);
+  color: var(--ink);
+  text-align: start;
+  cursor: auto;
+}
+
+.menu-section {
+  padding: 12px 0 6px;
+  border-bottom: 1px solid var(--line);
+}
+
+.menu-section:last-child {
+  border-bottom: 0;
+}
+
+.menu-section h3 {
+  margin: 0 0 6px;
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  color: var(--muted);
+}
+
+.menu-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 5px 0;
+}
+
+.menu-label {
+  font-size: 13px;
+}
+
+.menu-note {
+  margin: 2px 0 6px;
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--muted);
+}
+
+.menu-value {
+  font-size: 12.5px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.menu-action-btn {
+  appearance: none;
+  width: 100%;
+  margin-top: 6px;
+  padding: 9px 14px;
+  border: 0;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--ink) 7%, transparent);
+  color: var(--ink);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.menu-action-btn:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--ink) 14%, transparent);
+}
+
+.menu-action-btn:disabled {
+  opacity: 0.5;
+  cursor: wait;
 }

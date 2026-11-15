@@ -6,8 +6,23 @@
     <link rel="manifest" href="/manifest.webmanifest" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>一行ニュース — 同じニュースは、一行。</title>
-    <script type="module" crossorigin src="/assets/index-DdNEpF4b.js"></script>
-    <link rel="stylesheet" crossorigin href="/assets/index-CTG70m7g.css">
+    <script>
+      // テーマとフォントサイズは描画前に適用し、ちらつきを防ぐ（設定は localStorage の ichigyo:* ）
+      try {
+        var t = localStorage.getItem('ichigyo:theme') || 'light'
+        var dark =
+          t === 'dark' ||
+          (t === 'system' &&
+            window.matchMedia('(prefers-color-scheme: dark)').matches)
+        document.documentElement.dataset.theme = dark ? 'dark' : 'light'
+        document.documentElement.dataset.fontSize =
+          localStorage.getItem('ichigyo:fontSize') || 'medium'
+      } catch (e) {
+        /* 読めなければ既定（ライト／中）で表示する */
+      }
+    </script>
+    <script type="module" crossorigin src="/assets/index-D-oe85z7.js"></script>
+    <link rel="stylesheet" crossorigin href="/assets/index-B92AFNGc.css">
   </head>
   <body>
     <div id="root"></div>

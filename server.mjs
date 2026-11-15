@@ -1,5 +1,5 @@
 // ニュースアプリ サーバー（Node標準のみ）。
-// 起動: node server.mjs  （PORT / HOST / ACCESS_TOKEN 環境変数で変更可、既定 8787 / 全インターフェース / 無認証）
+// 起動: node server.mjs  （PORT / HOST / ACCESS_TOKEN / NEWS_DB_PATH 環境変数で変更可、既定 8787 / 全インターフェース / 無認証 / data/news.db）
 // 収集は「開いた時だけ」: データがあれば即返し、古ければ背後で更新する（stale-while-revalidate）。
 // DBが空の初回だけ収集を待つ。
 import { createServer } from 'node:http';
@@ -17,7 +17,7 @@ const PUBLIC_DIR = join(ROOT, 'public');
 const PORT = Number(process.env.PORT || 8787);
 const HOST = process.env.HOST || undefined; // 未指定なら全インターフェースで待ち受け
 const ACCESS_TOKEN = process.env.ACCESS_TOKEN || '';
-const DB_PATH = join(ROOT, 'data', 'news.db');
+const DB_PATH = process.env.NEWS_DB_PATH || join(ROOT, 'data', 'news.db');
 const db = openDb(DB_PATH);
 
 function dbBytes() {
@@ -80,7 +80,7 @@ function hasData() {
 
 /* ---------- 一覧（バージョン行） ---------- */
 
-function tabWhere(tab, category) {
+function tabWhere(tab, category, muted = []) {
   const conds = [];
   const params = [];
   if (tab === 'important') {
@@ -88,6 +88,12 @@ function tabWhere(tab, category) {
     // 重要タブは各ニュース（クラスタ）につき最新版の行だけを出す（2026-11-15 ユーザー承認）。
     // 新着・すべてタブは全バージョンを行表示する従来どおり。
     conds.push('v.version_no = (SELECT MAX(v2.version_no) FROM versions v2 WHERE v2.cluster_id = c.id)');
+    // カテゴリのミュート（設定メニュー、2026-11-15 ユーザー決定）: 重要タブのときだけ除外する。
+    // muted は DB上のカテゴリ値（「その他」は ''）の配列。行・total・カテゴリ別件数で同じ条件を使う。
+    if (muted.length > 0) {
+      conds.push(`c.category NOT IN (${muted.map(() => '?').join(', ')})`);
+      params.push(...muted);
+    }
   }
   if (tab === 'bookmarks') {
     // ブックマークタブも各クラスタにつき最新版の行だけを出す（並びはブックマーク日時順）
@@ -120,6 +126,7 @@ const ROWS_SELECT = `
     SELECT v.id AS version_id, v.version_no, v.title AS version_title, v.created_at AS version_created_at,
            c.id AS cluster_id, c.title AS cluster_title, c.category, c.first_seen_at, c.last_seen_at, c.importance_score,
            EXISTS (SELECT 1 FROM bookmarks b WHERE b.cluster_id = c.id) AS bookmarked,
+           EXISTS (SELECT 1 FROM read_events re WHERE re.cluster_id = c.id) AS read_flag,
            COUNT(a.id) AS article_count, COUNT(DISTINCT a.source) AS source_count,
            MAX(a.published_at) AS latest_published,
            GROUP_CONCAT(DISTINCT a.source) AS sources,
@@ -138,14 +145,14 @@ const ROWS_SELECT = `
     JOIN clusters c ON c.id = v.cluster_id
     JOIN articles a ON a.version_id = v.id`;
 
-function versionRows(tab, category, limit, offset) {
-  const { where, params } = tabWhere(tab, category);
+function versionRows(tab, category, limit, offset, muted = []) {
+  const { where, params } = tabWhere(tab, category, muted);
   return db.prepare(`${ROWS_SELECT} ${where} GROUP BY v.id ORDER BY ${tabOrder(tab)} LIMIT ? OFFSET ?`)
     .all(...params, limit, offset);
 }
 
-function versionTotal(tab, category) {
-  const { where, params } = tabWhere(tab, category);
+function versionTotal(tab, category, muted = []) {
+  const { where, params } = tabWhere(tab, category, muted);
   const row = db.prepare(`SELECT COUNT(*) AS total FROM (
     SELECT v.id FROM versions v JOIN clusters c ON c.id = v.cluster_id JOIN articles a ON a.version_id = v.id
     ${where} GROUP BY v.id)`).get(...params);
@@ -153,8 +160,8 @@ function versionTotal(tab, category) {
 }
 
 /** タブ条件（カテゴリ絞りなし）でのカテゴリ別件数。空カテゴリは「その他」。 */
-function categoryCounts(tab) {
-  const { where, params } = tabWhere(tab, null);
+function categoryCounts(tab, muted = []) {
+  const { where, params } = tabWhere(tab, null, muted);
   const rows = db.prepare(`
     SELECT CASE WHEN c.category = '' THEN 'その他' ELSE c.category END AS category, COUNT(DISTINCT v.id) AS count
     FROM versions v JOIN clusters c ON c.id = v.cluster_id JOIN articles a ON a.version_id = v.id
@@ -177,14 +184,21 @@ async function apiStories(url) {
   const category = ['すべて', ...CATEGORIES].includes(catParam) ? catParam : 'すべて';
   const limit = Math.min(500, Math.max(1, Number.parseInt(url.searchParams.get('limit') || '100', 10) || 100));
   const offset = Math.max(0, Number.parseInt(url.searchParams.get('offset') || '0', 10) || 0);
+  // ミュートカテゴリ（カンマ区切りの表示名）。重要タブでのみ tabWhere が適用する。
+  // 表示名「その他」は DB値 '' に読み替える。未知の名前は無視する。
+  const muted = (url.searchParams.get('mute') || '')
+    .split(',')
+    .map((s) => s.trim())
+    .filter((s) => CATEGORIES.includes(s))
+    .map((s) => (s === 'その他' ? '' : s));
   return {
-    stories: versionRows(tab, category, limit, offset),
-    total: versionTotal(tab, category),
+    stories: versionRows(tab, category, limit, offset, muted),
+    total: versionTotal(tab, category, muted),
     limit,
     offset,
     refreshing: kicked || refreshing !== null,
     lastRun: lastFinishedRun(),
-    categories: categoryCounts(tab),
+    categories: categoryCounts(tab, muted),
   };
 }
 

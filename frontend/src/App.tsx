@@ -94,6 +94,8 @@ function formatWhen(iso: string) {
 type DetailState = 'loading' | 'loaded'
 type EditorialState = 'unchecked' | 'loading' | 'done'
 type BodyState = 'loading' | 'done'
+type FontSizeSetting = 'small' | 'medium' | 'large'
+type ThemeSetting = 'light' | 'dark' | 'system'
 
 interface ListPage {
   ids: string[]
@@ -203,6 +205,154 @@ function App() {
     }
   }
 
+  // 設定メニュー（ハンバーガー、2026-11-15 ユーザー決定）。全設定は localStorage に保存し、
+  // テーマとフォントサイズは index.html の先行スクリプトが描画前に同じキーで適用する。
+  const [fontSize, setFontSize] = useState<FontSizeSetting>(() => {
+    try {
+      const v = localStorage.getItem('ichigyo:fontSize')
+      return v === 'small' || v === 'large' ? v : 'medium'
+    } catch {
+      return 'medium'
+    }
+  })
+  const [theme, setTheme] = useState<ThemeSetting>(() => {
+    try {
+      const v = localStorage.getItem('ichigyo:theme')
+      return v === 'dark' || v === 'system' ? v : 'light'
+    } catch {
+      return 'light'
+    }
+  })
+  const [dimRead, setDimRead] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem('ichigyo:dimRead') !== '0'
+    } catch {
+      return true
+    }
+  })
+  const [showThumbs, setShowThumbs] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem('ichigyo:showThumbs') !== '0'
+    } catch {
+      return true
+    }
+  })
+  const [mutedCategories, setMutedCategories] = useState<string[]>(() => {
+    try {
+      const v: unknown = JSON.parse(
+        localStorage.getItem('ichigyo:mutedCategories') || '[]',
+      )
+      return Array.isArray(v)
+        ? v.filter(
+            (c): c is string =>
+              typeof c === 'string' && CATEGORY_ORDER.includes(c),
+          )
+        : []
+    } catch {
+      return []
+    }
+  })
+  const [menuOpen, setMenuOpen] = useState(false)
+  const menuRef = useRef<HTMLDivElement | null>(null)
+  /** このセッションで詳細を開いたクラスタ（サーバーの read_flag と合わせて薄表示に使う） */
+  const [readClusters, setReadClusters] = useState<ReadonlySet<number>>(
+    new Set(),
+  )
+  const mutedRef = useRef<string[]>(mutedCategories)
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('ichigyo:fontSize', fontSize)
+    } catch {
+      /* 保存できなくても動作は続ける */
+    }
+    document.documentElement.dataset.fontSize = fontSize
+  }, [fontSize])
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('ichigyo:theme', theme)
+    } catch {
+      /* 同上 */
+    }
+  }, [theme])
+
+  // テーマの実効値（「端末に合わせる」は prefers-color-scheme で解決）を <html data-theme> に反映する
+  useEffect(() => {
+    const mq = window.matchMedia('(prefers-color-scheme: dark)')
+    const apply = () => {
+      const dark = theme === 'dark' || (theme === 'system' && mq.matches)
+      document.documentElement.dataset.theme = dark ? 'dark' : 'light'
+    }
+    apply()
+    if (theme !== 'system') return
+    mq.addEventListener('change', apply)
+    return () => mq.removeEventListener('change', apply)
+  }, [theme])
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('ichigyo:dimRead', dimRead ? '1' : '0')
+    } catch {
+      /* 同上 */
+    }
+  }, [dimRead])
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('ichigyo:showThumbs', showThumbs ? '1' : '0')
+    } catch {
+      /* 同上 */
+    }
+  }, [showThumbs])
+
+  useEffect(() => {
+    mutedRef.current = mutedCategories
+    try {
+      localStorage.setItem(
+        'ichigyo:mutedCategories',
+        JSON.stringify(mutedCategories),
+      )
+    } catch {
+      /* 同上 */
+    }
+  }, [mutedCategories])
+
+  // 設定メニューは外側クリックと Esc で閉じる
+  useEffect(() => {
+    if (!menuOpen) return
+    const onPointerDown = (e: PointerEvent) => {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+        setMenuOpen(false)
+      }
+    }
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setMenuOpen(false)
+    }
+    document.addEventListener('pointerdown', onPointerDown)
+    document.addEventListener('keydown', onKeyDown)
+    return () => {
+      document.removeEventListener('pointerdown', onPointerDown)
+      document.removeEventListener('keydown', onKeyDown)
+    }
+  }, [menuOpen])
+
+  /** 重要タブのカテゴリミュート切替。条件が変わるので重要タブのキャッシュは捨てる。 */
+  function toggleMuteCategory(cat: string) {
+    setMutedCategories((prev) =>
+      prev.includes(cat) ? prev.filter((c) => c !== cat) : [...prev, cat],
+    )
+    setPages((prev) => {
+      const updated = { ...prev }
+      for (const k of Object.keys(updated)) {
+        if (k.startsWith('important|')) delete updated[k]
+      }
+      return updated
+    })
+    pollSnapshotRef.current = null
+    if (tab === 'important') setSelectedId(null)
+  }
+
   // ポーリング（横ディスプレイ常駐表示用、2026-11-15 ユーザー承認）。
   // ON/OFF と間隔は localStorage に保存し、リロード後も復元する。
   const [polling, setPolling] = useState<boolean>(() => {
@@ -285,7 +435,13 @@ function App() {
   const loadPage = useCallback(
     async (target: FeedTab, cat: string, offset: number, append: boolean) => {
       try {
-        const result = await fetchTabRows(target, cat, offset)
+        const result = await fetchTabRows(
+          target,
+          cat,
+          offset,
+          100,
+          mutedRef.current,
+        )
         setRows((prev) => {
           const next = { ...prev }
           for (const row of result.rows) {
@@ -362,7 +518,13 @@ function App() {
     }
     await loadPage(tab, category, 0, false)
     try {
-      const page = await fetchTabRows('important', ALL_CATEGORY, 0, 100)
+      const page = await fetchTabRows(
+        'important',
+        ALL_CATEGORY,
+        0,
+        100,
+        mutedRef.current,
+      )
       const prev = pollSnapshotRef.current
       pollSnapshotRef.current = new Map(
         page.rows.map((r) => [r.clusterId, r.version]),
@@ -392,7 +554,7 @@ function App() {
     }
     // 開始時点の重要タブを基準スナップショットにする（既存分を新着にしない）
     if (pollSnapshotRef.current === null) {
-      fetchTabRows('important', ALL_CATEGORY, 0, 100)
+      fetchTabRows('important', ALL_CATEGORY, 0, 100, mutedRef.current)
         .then((page) => {
           if (pollSnapshotRef.current === null) {
             pollSnapshotRef.current = new Map(
@@ -479,6 +641,10 @@ function App() {
     setDetailState((prev) => ({ ...prev, [cid]: 'loading' }))
     // 閲覧ログ（日次集計の材料）を fire-and-forget で送る
     postReadEvent(cid)
+    // 開いたクラスタはこのセッションでも既読として扱う（一覧の薄表示用）
+    setReadClusters((prev) =>
+      prev.has(cid) ? prev : new Set(prev).add(cid),
+    )
     fetchClusterDetail(cid)
       .then((detail) => {
         setRows((prev) => {
@@ -780,38 +946,6 @@ function App() {
                 </div>
               ) : null}
             </div>
-            <div className="util-set db-set">
-              {dbBytes !== null ? (
-                <span className="db-size" title="データベースの容量">
-                  DB {formatBytes(dbBytes)}
-                </span>
-              ) : null}
-              <button
-                type="button"
-                className="icon-btn"
-                onClick={() => setConfirmingMaintenance(true)}
-                disabled={maintaining}
-                title="古いデータを削除してDBを圧縮"
-                aria-label="古いデータを削除してデータベースを圧縮"
-              >
-                <svg
-                  width="17"
-                  height="17"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  aria-hidden="true"
-                >
-                  <polyline points="3 6 5 6 21 6" />
-                  <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
-                  <line x1="10" y1="11" x2="10" y2="17" />
-                  <line x1="14" y1="11" x2="14" y2="17" />
-                </svg>
-              </button>
-            </div>
             <button
               type="button"
               className="icon-btn"
@@ -837,6 +971,178 @@ function App() {
                 <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" />
               </svg>
             </button>
+            <div className="menu-wrap" ref={menuRef}>
+              <button
+                type="button"
+                className="icon-btn"
+                onClick={() => setMenuOpen((v) => !v)}
+                aria-haspopup="menu"
+                aria-expanded={menuOpen}
+                title="設定"
+                aria-label="設定メニューを開く"
+              >
+                <svg
+                  width="17"
+                  height="17"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  aria-hidden="true"
+                >
+                  <line x1="3" y1="6" x2="21" y2="6" />
+                  <line x1="3" y1="12" x2="21" y2="12" />
+                  <line x1="3" y1="18" x2="21" y2="18" />
+                </svg>
+              </button>
+              {menuOpen ? (
+                <div className="menu-panel" role="menu" aria-label="設定">
+                  <section className="menu-section">
+                    <h3>表示</h3>
+                    <div className="menu-row">
+                      <span className="menu-label">文字の大きさ</span>
+                      <div
+                        className="segmented"
+                        role="group"
+                        aria-label="文字の大きさ"
+                      >
+                        {(
+                          [
+                            ['small', '小'],
+                            ['medium', '中'],
+                            ['large', '大'],
+                          ] as const
+                        ).map(([value, label]) => (
+                          <button
+                            key={value}
+                            type="button"
+                            className={
+                              fontSize === value ? 'seg is-active' : 'seg'
+                            }
+                            onClick={() => setFontSize(value)}
+                            aria-pressed={fontSize === value}
+                          >
+                            {label}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                    <div className="menu-row">
+                      <span className="menu-label">テーマ</span>
+                      <div
+                        className="segmented"
+                        role="group"
+                        aria-label="テーマ"
+                      >
+                        {(
+                          [
+                            ['light', 'ライト'],
+                            ['dark', 'ダーク'],
+                            ['system', '端末'],
+                          ] as const
+                        ).map(([value, label]) => (
+                          <button
+                            key={value}
+                            type="button"
+                            className={
+                              theme === value ? 'seg is-active' : 'seg'
+                            }
+                            onClick={() => setTheme(value)}
+                            aria-pressed={theme === value}
+                            title={
+                              value === 'system'
+                                ? '端末に合わせる'
+                                : undefined
+                            }
+                          >
+                            {label}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                    <div className="menu-row">
+                      <span className="menu-label">サムネイル画像</span>
+                      <button
+                        type="button"
+                        className="switch"
+                        role="switch"
+                        aria-checked={showThumbs}
+                        onClick={() => setShowThumbs((v) => !v)}
+                        aria-label="一覧のサムネイル画像を表示する"
+                      >
+                        <span className="switch-track">
+                          <span className="switch-thumb" />
+                        </span>
+                      </button>
+                    </div>
+                    <div className="menu-row">
+                      <span className="menu-label">
+                        読んだニュースを薄く表示
+                      </span>
+                      <button
+                        type="button"
+                        className="switch"
+                        role="switch"
+                        aria-checked={dimRead}
+                        onClick={() => setDimRead((v) => !v)}
+                        aria-label="詳細を開いたニュースの行を薄く表示する"
+                      >
+                        <span className="switch-track">
+                          <span className="switch-thumb" />
+                        </span>
+                      </button>
+                    </div>
+                  </section>
+                  <section className="menu-section">
+                    <h3>重要タブに出さないカテゴリ</h3>
+                    <p className="menu-note">
+                      オンにしたカテゴリは重要タブに表示されません。新着・すべて・社説タブには影響しません。
+                    </p>
+                    {CATEGORY_ORDER.map((c) => (
+                      <div className="menu-row" key={c}>
+                        <span className="menu-label">{c}</span>
+                        <button
+                          type="button"
+                          className="switch"
+                          role="switch"
+                          aria-checked={mutedCategories.includes(c)}
+                          onClick={() => toggleMuteCategory(c)}
+                          aria-label={`${c}を重要タブに出さない`}
+                        >
+                          <span className="switch-track">
+                            <span className="switch-thumb" />
+                          </span>
+                        </button>
+                      </div>
+                    ))}
+                  </section>
+                  <section className="menu-section">
+                    <h3>データの管理</h3>
+                    <div className="menu-row">
+                      <span className="menu-label">データベース容量</span>
+                      <span className="menu-value">
+                        {dbBytes !== null ? formatBytes(dbBytes) : '—'}
+                      </span>
+                    </div>
+                    <button
+                      type="button"
+                      className="menu-action-btn"
+                      onClick={() => {
+                        setMenuOpen(false)
+                        setConfirmingMaintenance(true)
+                      }}
+                      disabled={maintaining}
+                    >
+                      古いデータを削除してDBを圧縮
+                    </button>
+                    <p className="menu-note">
+                      7日より前のニュース（ブックマークしたものを除く）を削除します。実行前に確認ダイアログが出ます。
+                    </p>
+                  </section>
+                </div>
+              ) : null}
+            </div>
           </div>
         </div>
       </header>
@@ -996,6 +1302,10 @@ function App() {
                     'row',
                     isActive ? 'is-active' : '',
                     highlightClusters.has(story.clusterId) ? 'is-new' : '',
+                    dimRead &&
+                    (story.read || readClusters.has(story.clusterId))
+                      ? 'is-read'
+                      : '',
                   ]
                     .filter(Boolean)
                     .join(' ')
@@ -1006,7 +1316,7 @@ function App() {
                         className={rowClass}
                         onClick={() => openStory(story.id)}
                       >
-                        {story.imageUrl ? (
+                        {showThumbs && story.imageUrl ? (
                           <img
                             className="row-thumb"
                             src={story.imageUrl}

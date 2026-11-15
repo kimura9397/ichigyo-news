@@ -49,6 +49,8 @@ export interface StoryRow {
   bookmarked?: boolean
   /** 社説が確認できた媒体名（短い名前、紙の並び順）。社説タブの行表示用 */
   editorialPapers?: string[]
+  /** 詳細を開いたことがある（既読）クラスタか。一覧の薄表示に使う */
+  read?: boolean
 }
 
 export type FeedTab = 'important' | 'fresh' | 'all' | 'editorials' | 'bookmarks'

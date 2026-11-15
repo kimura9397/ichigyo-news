@@ -13,6 +13,8 @@ interface RawStoryRow {
   cluster_title: string
   category: string
   bookmarked?: number
+  /** 既読（read_events に記録がある）なら 1 */
+  read_flag?: number
   first_seen_at: string
   last_seen_at: string
   importance_score: number
@@ -386,6 +388,7 @@ function rowFromListItem(item: RawStoryRow): StoryRow {
     isImportant: item.importance_score >= IMPORTANT_THRESHOLD,
     isNew: isWithinNewWindow(item.version_created_at),
     bookmarked: !!item.bookmarked,
+    read: !!item.read_flag,
     imageUrl: safeUrl(item.image_url) || undefined,
     bodyCount: item.body_count ?? 0,
     bodyChars: item.body_chars ?? 0,
@@ -469,12 +472,14 @@ async function fetchJson<T>(url: string, init?: RequestInit): Promise<T> {
   return (await res.json()) as T
 }
 
-/** タブ＋カテゴリ別の一覧を1ページ分取得する。UIの 'fresh' は API の 'new' に対応。 */
+/** タブ＋カテゴリ別の一覧を1ページ分取得する。UIの 'fresh' は API の 'new' に対応。
+ *  mutedCategories は重要タブでのみサーバーへ渡す（他タブではサーバー側でも無視される）。 */
 export async function fetchTabRows(
   tab: FeedTab,
   category: string,
   offset = 0,
   limit = 100,
+  mutedCategories: string[] = [],
 ): Promise<StoriesPage> {
   const apiTab = tab === 'fresh' ? 'new' : tab
   const params = new URLSearchParams({
@@ -483,6 +488,9 @@ export async function fetchTabRows(
     offset: String(offset),
   })
   if (category && category !== 'すべて') params.set('category', category)
+  if (apiTab === 'important' && mutedCategories.length > 0) {
+    params.set('mute', mutedCategories.join(','))
+  }
   const data = await fetchJson<{
     stories: RawStoryRow[]
     total: number

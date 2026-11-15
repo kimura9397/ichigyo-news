@@ -6,6 +6,21 @@
     <link rel="manifest" href="/manifest.webmanifest" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>一行ニュース — 同じニュースは、一行。</title>
+    <script>
+      // テーマとフォントサイズは描画前に適用し、ちらつきを防ぐ（設定は localStorage の ichigyo:* ）
+      try {
+        var t = localStorage.getItem('ichigyo:theme') || 'light'
+        var dark =
+          t === 'dark' ||
+          (t === 'system' &&
+            window.matchMedia('(prefers-color-scheme: dark)').matches)
+        document.documentElement.dataset.theme = dark ? 'dark' : 'light'
+        document.documentElement.dataset.fontSize =
+          localStorage.getItem('ichigyo:fontSize') || 'medium'
+      } catch (e) {
+        /* 読めなければ既定（ライト／中）で表示する */
+      }
+    </script>
   </head>
   <body>
     <div id="root"></div>

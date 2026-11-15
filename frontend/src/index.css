@@ -10,6 +10,10 @@
   --fs-row-title: 13px;
   --fs-detail-title: 24px;
   --fs-paper-title: 19px;
+  /* 本文系テキストのスケール係数（フォントサイズ設定で切り替える） */
+  --font-scale: 1;
+  /* 色を薄める方向の混色ベース（ダークテーマでは暗い色に差し替える） */
+  --tint-base: #ffffff;
   --serif: 'Iowan Old Style', 'Hiragino Mincho ProN', 'Yu Mincho', serif;
   --sans: 'Hiragino Sans', 'Yu Gothic UI', system-ui, sans-serif;
   --mono: ui-monospace, 'Cascadia Mono', monospace;
@@ -40,4 +44,35 @@ body {
 button:focus-visible {
   outline: 2px solid var(--vermillion);
   outline-offset: 2px;
+}
+
+/* フォントサイズ設定（小／中／大、2026-11-15 ユーザー決定）。
+   <html data-font-size> は index.html の先行スクリプトと React が設定する */
+:root[data-font-size='small'] {
+  --fs-row-title: 12px;
+  --fs-detail-title: 21px;
+  --fs-paper-title: 17px;
+  --font-scale: 0.92;
+}
+
+:root[data-font-size='large'] {
+  --fs-row-title: 15px;
+  --fs-detail-title: 28px;
+  --fs-paper-title: 22px;
+  --font-scale: 1.12;
+}
+
+/* ダークテーマ（2026-11-15 ユーザー決定）。朱色アクセント等のデザイン言語は保ち、
+   地と文字のパレットだけを暗色に差し替える。<html data-theme='dark'> で有効化 */
+:root[data-theme='dark'] {
+  --ink: #ece4d4;
+  --muted: #a89b87;
+  --paper: #262019;
+  --line: #4a4136;
+  --vermillion: #e0685a;
+  --fresh: #4cb3a5;
+  --shadow: 0 10px 30px rgb(0 0 0 / 0.45);
+  --tint-base: #2e2822;
+  background: #171310;
+  color-scheme: dark;
 }
