@@ -21,7 +21,6 @@ const TABS: { id: FeedTab; label: string; hint: string }[] = [
   { id: 'fresh', label: '新着', hint: '直近で入った初報と続報' },
   { id: 'all', label: 'すべて', hint: '版を含む全行' },
   { id: 'editorials', label: '社説', hint: '社説が確認できたニュース' },
-  { id: 'bookmarks', label: 'ブックマーク', hint: '保存したニュース' },
 ]
 
 function formatBytes(bytes: number) {
@@ -87,6 +86,8 @@ const listKey = (tab: FeedTab, category: string) => `${tab}|${category}`
 
 function App() {
   const [tab, setTab] = useState<FeedTab>('important')
+  // ブックマーク件数（タブ行右端のボタンの併記用。不明な間は null）
+  const [bookmarkCount, setBookmarkCount] = useState<number | null>(null)
   const [category, setCategory] = useState<string>(ALL_CATEGORY)
   // タブ×カテゴリごとに取得したページ（APIの返却順をそのまま使う）
   const [pages, setPages] = useState<Record<string, ListPage | null>>({})
@@ -175,6 +176,17 @@ function App() {
       .then((s) => setDbBytes(s.dbBytes))
       .catch(() => {})
   }, [])
+
+  /** ブックマーク件数だけを軽く取り直す（limit=1 で total のみ使う）。 */
+  const refreshBookmarkCount = useCallback(() => {
+    fetchTabRows('bookmarks', ALL_CATEGORY, 0, 1)
+      .then((r) => setBookmarkCount(r.total))
+      .catch(() => {})
+  }, [])
+
+  useEffect(() => {
+    refreshBookmarkCount()
+  }, [refreshBookmarkCount])
 
   const key = listKey(tab, category)
   const page = pages[key] ?? null
@@ -534,7 +546,7 @@ function App() {
         }
         return updated
       })
-      // ブックマークタブの一覧は古くなるので破棄し、次に開いたときに取り直す
+      // ブックマーク一覧は古くなるので破棄し、次に開いたときに取り直す
       setPages((prev) => {
         const updated = { ...prev }
         for (const k of Object.keys(updated)) {
@@ -542,6 +554,7 @@ function App() {
         }
         return updated
       })
+      refreshBookmarkCount()
     } catch {
       setLoadError('ブックマークの更新に失敗しました。')
     }
@@ -692,6 +705,33 @@ function App() {
             <small>{item.hint}</small>
           </button>
         ))}
+        <button
+          type="button"
+          className={
+            tab === 'bookmarks' ? 'bookmark-nav is-active' : 'bookmark-nav'
+          }
+          onClick={() => switchTab('bookmarks')}
+          aria-current={tab === 'bookmarks' ? 'page' : undefined}
+          aria-label="ブックマークしたニュースを表示"
+          title="ブックマーク"
+        >
+          <svg
+            width="17"
+            height="17"
+            viewBox="0 0 24 24"
+            fill={tab === 'bookmarks' ? 'currentColor' : 'none'}
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            aria-hidden="true"
+          >
+            <path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z" />
+          </svg>
+          {bookmarkCount !== null && bookmarkCount > 0 ? (
+            <span className="bookmark-count">{bookmarkCount}</span>
+          ) : null}
+        </button>
       </nav>
 
       <div className="cat-bar" role="tablist" aria-label="カテゴリ">

@@ -38,13 +38,16 @@
 }
 
 .tabs {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: stretch;
   border-bottom: 1px solid var(--line);
 }
 
 .tab {
   appearance: none;
+  flex: 1 1 0;
+  min-width: 0;
   border: 0;
   border-inline-end: 1px solid var(--line);
   background: transparent;
@@ -54,8 +57,38 @@
   color: inherit;
 }
 
-.tab:last-child {
-  border-inline-end: 0;
+/* ブックマークはタブではなく、タブ行の右端に置く見た目の違うアイコンボタン */
+.bookmark-nav {
+  appearance: none;
+  flex: 0 0 auto;
+  align-self: center;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin: 0 10px;
+  padding: 7px 11px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.bookmark-nav:hover {
+  color: var(--ink);
+  border-color: var(--muted);
+}
+
+.bookmark-nav.is-active {
+  color: var(--vermillion);
+  border-color: var(--vermillion);
+  background: color-mix(in srgb, var(--vermillion) 10%, white);
+}
+
+.bookmark-count {
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1;
 }
 
 .tab span {
@@ -456,6 +489,22 @@
 @media (max-width: 860px) {
   .masthead-side {
     align-items: flex-start;
+  }
+}
+
+/* 狭い画面ではタブの補足（hint）を落として、タブ行を1行に収める */
+@media (max-width: 560px) {
+  .tab {
+    padding: 12px 10px 10px;
+  }
+
+  .tab small {
+    display: none;
+  }
+
+  .bookmark-nav {
+    margin: 0 6px;
+    padding: 6px 9px;
   }
 }
 
