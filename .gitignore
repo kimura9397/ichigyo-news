@@ -1,0 +1,15 @@
+# 収集データ（SQLite DB）は公開しない
+data/
+
+# Node
+node_modules/
+frontend/node_modules/
+frontend/dist/
+
+# ログ
+*.log
+
+# OS系ファイル
+.DS_Store
+Thumbs.db
+desktop.ini

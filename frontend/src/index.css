@@ -1,0 +1,39 @@
+:root {
+  --ink: #1c1712;
+  --muted: #6d645a;
+  --paper: #f4eee3;
+  --line: #d8cfc2;
+  --vermillion: #b13224;
+  --fresh: #1f6f64;
+  --shadow: 0 10px 30px color-mix(in srgb, var(--ink) 8%, transparent);
+  --serif: 'Iowan Old Style', 'Hiragino Mincho ProN', 'Yu Mincho', serif;
+  --sans: 'Hiragino Sans', 'Yu Gothic UI', system-ui, sans-serif;
+  --mono: ui-monospace, 'Cascadia Mono', monospace;
+  font: 15px/1.6 var(--sans);
+  color: var(--ink);
+  background: #efe8db;
+  color-scheme: light;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  margin: 0;
+  min-height: 100%;
+}
+
+body {
+  min-height: 100svh;
+}
+
+button:focus-visible {
+  outline: 2px solid var(--vermillion);
+  outline-offset: 2px;
+}
