@@ -1,4 +1,13 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties,
+  type KeyboardEvent as ReactKeyboardEvent,
+  type PointerEvent as ReactPointerEvent,
+} from 'react'
 import {
   addBookmark,
   applyEditorials,
@@ -31,6 +40,11 @@ function formatBytes(bytes: number) {
 
 const BASE_TITLE = '一行ニュース — 同じニュースは、一行。'
 const POLL_INTERVALS = [2, 5, 10]
+
+// 一覧ペインの幅比率（PCレイアウト、2026-11-15 ユーザー決定でドラッグ調整可能に）
+const PANE_RATIO_DEFAULT = 0.38
+const PANE_RATIO_MIN_PX = 270
+const PANE_RATIO_MAX = 0.65
 
 /** 本文テキストを段落ごとに <p> で描く（改行を行・段落の区切りとして扱う）。 */
 function Paragraphs({ text }: { text: string }) {
@@ -114,6 +128,76 @@ function App() {
   const [confirmingMaintenance, setConfirmingMaintenance] = useState(false)
   const [toast, setToast] = useState<string | null>(null)
   const detailRef = useRef<HTMLElement | null>(null)
+  const workspaceRef = useRef<HTMLDivElement | null>(null)
+
+  // 一覧ペインの幅比率。境界ドラッグで変え、localStorage に保存して復元する
+  const [paneRatio, setPaneRatio] = useState<number>(() => {
+    try {
+      const v = Number(localStorage.getItem('ichigyo:paneRatio'))
+      return v >= 0.15 && v <= PANE_RATIO_MAX ? v : PANE_RATIO_DEFAULT
+    } catch {
+      return PANE_RATIO_DEFAULT
+    }
+  })
+  const [paneDragging, setPaneDragging] = useState(false)
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('ichigyo:paneRatio', String(paneRatio))
+    } catch {
+      /* 保存できなくても動作は続ける */
+    }
+  }, [paneRatio])
+
+  // ドラッグ中はカーソルとテキスト選択を画面全体で固定する
+  useEffect(() => {
+    if (!paneDragging) return
+    const prevCursor = document.body.style.cursor
+    const prevSelect = document.body.style.userSelect
+    document.body.style.cursor = 'col-resize'
+    document.body.style.userSelect = 'none'
+    return () => {
+      document.body.style.cursor = prevCursor
+      document.body.style.userSelect = prevSelect
+    }
+  }, [paneDragging])
+
+  /** 一覧の最小幅（px）と最大比率で比率をクランプする。 */
+  const clampPaneRatio = useCallback((ratio: number) => {
+    const width = workspaceRef.current?.clientWidth ?? 0
+    const min =
+      width > 0
+        ? Math.min(PANE_RATIO_MIN_PX / width, PANE_RATIO_MAX)
+        : 0.15
+    return Math.min(PANE_RATIO_MAX, Math.max(min, ratio))
+  }, [])
+
+  function handleDividerPointerDown(e: ReactPointerEvent<HTMLDivElement>) {
+    e.preventDefault()
+    e.currentTarget.setPointerCapture(e.pointerId)
+    setPaneDragging(true)
+  }
+
+  function handleDividerPointerMove(e: ReactPointerEvent<HTMLDivElement>) {
+    if (!paneDragging) return
+    const rect = workspaceRef.current?.getBoundingClientRect()
+    if (!rect || rect.width === 0) return
+    setPaneRatio(clampPaneRatio((e.clientX - rect.left) / rect.width))
+  }
+
+  function handleDividerKeyDown(e: ReactKeyboardEvent<HTMLDivElement>) {
+    const step = e.shiftKey ? 0.05 : 0.02
+    if (e.key === 'ArrowLeft') {
+      e.preventDefault()
+      setPaneRatio((r) => clampPaneRatio(r - step))
+    } else if (e.key === 'ArrowRight') {
+      e.preventDefault()
+      setPaneRatio((r) => clampPaneRatio(r + step))
+    } else if (e.key === 'Home') {
+      e.preventDefault()
+      setPaneRatio(PANE_RATIO_DEFAULT)
+    }
+  }
 
   // ポーリング（横ディスプレイ常駐表示用、2026-11-15 ユーザー承認）。
   // ON/OFF と間隔は localStorage に保存し、リロード後も復元する。
@@ -869,7 +953,11 @@ function App() {
         )}
       </div>
 
-      <div className="workspace">
+      <div
+        className="workspace"
+        ref={workspaceRef}
+        style={{ '--list-ratio': paneRatio } as CSSProperties}
+      >
         <section
           className="list-pane"
           aria-label="ニュース一覧"
@@ -968,6 +1056,25 @@ function App() {
             </>
           )}
         </section>
+
+        <div
+          className={paneDragging ? 'pane-divider is-dragging' : 'pane-divider'}
+          role="separator"
+          aria-orientation="vertical"
+          aria-label="一覧と詳細の幅を調整"
+          aria-valuemin={0}
+          aria-valuemax={100}
+          aria-valuenow={Math.round(paneRatio * 100)}
+          aria-valuetext={`一覧の幅 ${Math.round(paneRatio * 100)}%`}
+          tabIndex={0}
+          title="ドラッグで一覧と詳細の幅を調整（ダブルクリックで既定に戻す）"
+          onPointerDown={handleDividerPointerDown}
+          onPointerMove={handleDividerPointerMove}
+          onPointerUp={() => setPaneDragging(false)}
+          onPointerCancel={() => setPaneDragging(false)}
+          onDoubleClick={() => setPaneRatio(PANE_RATIO_DEFAULT)}
+          onKeyDown={handleDividerKeyDown}
+        />
 
         {selected ? (
           <article className="detail-pane" ref={detailRef}>

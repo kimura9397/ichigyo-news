@@ -113,8 +113,26 @@
 .workspace {
   flex: 1;
   display: grid;
-  grid-template-columns: minmax(280px, 38%) 1fr;
+  /* 一覧の幅比率は境界ドラッグで変更でき、--list-ratio（既定 0.38）で受ける */
+  grid-template-columns:
+    minmax(260px, calc(var(--list-ratio, 0.38) * 100%)) 8px
+    minmax(0, 1fr);
   min-height: 0;
+}
+
+/* 一覧と詳細の境界ドラッグハンドル。普段は透明で、ホバー/操作時だけ薄く見える */
+.pane-divider {
+  cursor: col-resize;
+  touch-action: none;
+  position: relative;
+  z-index: 4;
+  outline: none;
+}
+
+.pane-divider:hover,
+.pane-divider:focus-visible,
+.pane-divider.is-dragging {
+  background: color-mix(in srgb, var(--vermillion) 22%, transparent);
 }
 
 .list-pane {
@@ -377,6 +395,10 @@
   .workspace {
     grid-template-columns: 1fr;
     grid-template-rows: minmax(0, 42%) minmax(0, 1fr);
+  }
+
+  .pane-divider {
+    display: none;
   }
 
   .list-pane {
