@@ -101,6 +101,135 @@ export function extractOgImage(html, baseUrl = '') {
   return fallback;
 }
 
+// ---------- 記者署名（バイライン）の抽出（2026-11-15 ユーザー希望） ----------
+// 「同じ記者の他の記事を読んで、その記者の傾向を自分で判断したい」という用途のため、
+// 署名の抽出・保存・表示だけを行う。記者の傾向や偏向の自動ラベル付けは行わない。
+// 抽出元は (1) 本文テキスト中の署名表記（（○○記者）・文・○○ 等）、
+// (2) 取得HTMLの JSON-LD / meta の author。
+// 通信社の配信記事や NHK は署名が無いことが多い前提で、取れなければ空のままにする（捏造しない）。
+// 誤抽出を避けるため、候補は人名らしさの検証（cleanAuthorName）を通ったものだけを採用する。
+
+/** 媒体名・組織名に含まれがちな語。人名候補に含まれていたら人名ではないとみなす。 */
+const AUTHOR_ORG_WORDS = [
+  '新聞', '通信', '放送', 'テレビ', 'ラジオ', '編集', 'デスク', 'デジタル', 'ニュース',
+  '写真', '映像', '支局', '支社', '本社', '総局', '論説', '特派員', '記者クラブ', 'ウェブ', 'オンライン',
+];
+/** 配信元・媒体の略称そのものは人名ではない。 */
+const AUTHOR_NON_NAMES = new Set(['共同', '時事', 'ロイター', 'ブルームバーグ']);
+
+/**
+ * 署名候補を人名として検証・正規化する。人名らしくなければ '' を返す。
+ * 末尾の「記者」は役割表記なので落とす。デスク表記（政治部・社会部など、末尾が「部」）や
+ * 媒体・組織名は弾く。実在の姓名は概ね2〜7字（区切りを除く）という前提で長さも見る。
+ */
+export function cleanAuthorName(raw) {
+  let s = String(raw || '').replace(/[\s　]+/g, ' ').trim();
+  s = s.replace(/^[（(【\[「『]+/, '').replace(/[）)】\]」』]+$/, '').trim();
+  s = s.replace(/記者$/, '').trim();
+  if (!s) return '';
+  if (/[0-9０-９]/.test(s)) return '';
+  if (/[。、！？!?：:；;／/=＝@]/.test(s)) return '';
+  // 人名に使われる文字種だけを許可する（漢字・かな・カタカナ・長音・中黒・空白・ラテン文字・ハイフン・ピリオド）
+  if (!/^[A-Za-z\u3040-\u30ff\u4e00-\u9fff][A-Za-z\u3040-\u30ff\u4e00-\u9fff・\s.-]*$/u.test(s)) return '';
+  const core = s.replace(/[\s・.-]/g, '');
+  if (core.length < 2 || core.length > 10) return '';
+  if (AUTHOR_ORG_WORDS.some((w) => s.includes(w))) return '';
+  if (s.endsWith('部')) return ''; // 政治部・社会部などのデスク表記は人名ではない
+  if (AUTHOR_NON_NAMES.has(core)) return '';
+  return s;
+}
+
+// 署名パターン中の人名部分: 漢字・かなの1連（2〜7字）、または空白区切りの姓名
+const AUTHOR_NAME_SRC = String.raw`(?:[\u3040-\u30ff\u4e00-\u9fff]{2,7}|[\u3040-\u30ff\u4e00-\u9fff]{1,4}[\s　][\u3040-\u30ff\u4e00-\u9fff]{1,4})`;
+const BYLINE_BRACKET_RE = new RegExp(String.raw`[（(【](${AUTHOR_NAME_SRC})記者[）)】]`, 'gu');
+const BYLINE_BUN_RE = new RegExp(String.raw`(?:^|[\s（(【「。、\n])文\s*[・＝=：:／/]\s*(${AUTHOR_NAME_SRC})(?:\s*記者)?`, 'gmu');
+const BYLINE_TRAILING_RE = new RegExp(String.raw`(?:^|\n)[\s　]*(${AUTHOR_NAME_SRC})記者[\s　]*$`, 'gmu');
+
+/**
+ * 本文テキストから記者署名を抽出する。対象は日本語新聞の典型パターン:
+ * 「（○○記者）」という括弧表記、「文・○○」「文＝○○」というクレジット表記、
+ * 末尾行が「○○記者」だけの行。どれも人名検証を通った場合だけ採用する。
+ * 配信記事のクレジット（【○○共同】や（○○＝共同））は「記者」を含まないため対象にならない。
+ */
+export function extractAuthorFromText(text) {
+  const t = String(text || '');
+  if (!t) return '';
+  for (const re of [BYLINE_BRACKET_RE, BYLINE_BUN_RE, BYLINE_TRAILING_RE]) {
+    re.lastIndex = 0;
+    for (const m of t.matchAll(re)) {
+      const name = cleanAuthorName(m[1]);
+      if (name) return name;
+    }
+  }
+  return '';
+}
+
+/** JSON-LD の中から author（Person の name、または文字列）を探す。Organization は採らない。 */
+function findJsonLdAuthor(node, depth) {
+  if (!node || depth > 4) return '';
+  if (Array.isArray(node)) {
+    for (const item of node) {
+      const r = findJsonLdAuthor(item, depth + 1);
+      if (r) return r;
+    }
+    return '';
+  }
+  if (typeof node === 'object') {
+    if ('author' in node) {
+      const candidates = Array.isArray(node.author) ? node.author : [node.author];
+      for (const c of candidates) {
+        if (typeof c === 'string') {
+          const n = cleanAuthorName(c);
+          if (n) return n;
+        } else if (c && typeof c === 'object' && typeof c.name === 'string') {
+          const type = String(c['@type'] || '');
+          if (type && !/person/i.test(type)) continue; // 組織名は人名ではない
+          const n = cleanAuthorName(c.name);
+          if (n) return n;
+        }
+      }
+    }
+    for (const key of ['@graph', 'mainEntity', 'itemListElement']) {
+      if (key in node) {
+        const r = findJsonLdAuthor(node[key], depth + 1);
+        if (r) return r;
+      }
+    }
+  }
+  return '';
+}
+
+/**
+ * 取得HTMLから記者署名を抽出する: JSON-LD の author を優先し、次に
+ * meta name="author" / article:author を見る。どちらも人名検証を通った場合だけ採用する
+ * （媒体名が入っている場合は検証で落ちて '' になる）。
+ */
+export function extractAuthorFromHtml(html) {
+  const h = String(html || '');
+  if (!h) return '';
+  for (const m of h.matchAll(/<script\b[^>]*type\s*=\s*"application\/ld\+json"[^>]*>([\s\S]*?)<\/script>/gi)) {
+    let data;
+    try { data = JSON.parse(m[1].trim()); } catch { continue; }
+    const name = findJsonLdAuthor(data, 0);
+    if (name) return name;
+  }
+  for (const m of h.matchAll(/<meta\b[^>]*>/gi)) {
+    const tag = m[0];
+    const key = ((tag.match(/\b(?:property|name)\s*=\s*"([^"]+)"/i) || [])[1] || '').toLowerCase();
+    if (key !== 'author' && key !== 'article:author') continue;
+    const content = (tag.match(/\bcontent\s*=\s*"([^"]+)"/i) || [])[1];
+    if (!content) continue;
+    const name = cleanAuthorName(decodeEntities(content));
+    if (name) return name;
+  }
+  return '';
+}
+
+/** 本文テキストの署名表記を優先し、無ければHTMLのメタ情報から抽出する。 */
+export function extractAuthor(html, text) {
+  return extractAuthorFromText(text) || extractAuthorFromHtml(html);
+}
+
 // ---------- 本文のノイズ除去（2026-11-15 ユーザー承認） ----------
 // 取得本文に「Xでシェア！」「メールマガジン登録！」等の定型文が混ざると読む気を削ぐため、
 // (1) 構造での除外: class/id にノイズ語を含む要素を丸ごと落とす
@@ -245,11 +374,11 @@ export function extractBody(html) {
 }
 
 /**
- * ページを取得し、本文テキストと og:image をまとめて返す（取れなければ各々 ''）。
+ * ページを取得し、本文テキストと og:image、記者署名をまとめて返す（取れなければ各々 ''）。
  * リダイレクトは手動でたどり、各ホップでSSRFチェックを行う。
  */
 async function fetchPage(fetchImpl, url, timeoutMs = TIMEOUT_MS) {
-  const empty = { text: '', imageUrl: '' };
+  const empty = { text: '', imageUrl: '', author: '' };
   let current = url;
   for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
     if (!(await checkUrlAllowed(current))) return empty;
@@ -275,7 +404,8 @@ async function fetchPage(fetchImpl, url, timeoutMs = TIMEOUT_MS) {
       const ct = res.headers?.get?.('content-type') || '';
       if (ct && !/html|xml/i.test(ct)) return empty;
       const html = await res.text();
-      return { text: extractBody(html), imageUrl: extractOgImage(html, current) };
+      const text = extractBody(html);
+      return { text, imageUrl: extractOgImage(html, current), author: extractAuthor(html, text) };
     } catch {
       return empty;
     } finally {
@@ -316,8 +446,9 @@ function findYahooAlt(article, clusterArticles) {
  * 1記事分の本文取得: 候補URLを優先順に試し、最初に十分な長さが取れたものを採用する。
  * あわせて、取得したページの og:image（サムネイル）も拾う。本文が取れないページでも
  * og:image だけ取れればそれで良い。画像は最初に取得できた候補のものを採用する。
- * 戻り値: { text, url, via, imageUrl, imageIds }（imageIds は画像を帰属させる記事ID群。
- * Yahoo代替のページから取った画像は、同一記事と判断した代替元記事にも帰属させる）。
+ * 戻り値: { text, url, via, imageUrl, imageIds, author }（imageIds は画像を帰属させる記事ID群。
+ * Yahoo代替のページから取った画像は、同一記事と判断した代替元記事にも帰属させる。
+ * author は記者署名で、本文の採用元ページから取れたものを優先する）。
  */
 async function fetchArticleBody(db, article, clusterArticles, ctx) {
   const candidates = [];
@@ -340,51 +471,59 @@ async function fetchArticleBody(db, article, clusterArticles, ctx) {
   const alt = findYahooAlt(article, clusterArticles);
   if (alt) candidates.push({ url: alt.url, via: 'yahoo', altArticle: alt });
 
-  let best = { text: '', url: '', via: '', imageUrl: '', imageIds: [] };
+  let best = { text: '', url: '', via: '', imageUrl: '', imageIds: [], author: '' };
+  let anyAuthor = ''; // 本文の採用元で署名が取れなかった場合の保険（同一記事の別経路で取れた署名）
   for (const cand of candidates) {
     // Yahoo代替元の記事に既に本文がキャッシュされていれば、それを再利用する（再取得しない）
     let text = cand.altArticle?.body_text || '';
     let imageUrl = '';
+    let author = cand.altArticle?.author || '';
     if (!text) {
       const page = await fetchPage(ctx.fetchImpl, cand.url);
       text = page.text;
       imageUrl = page.imageUrl;
+      author = page.author;
     }
+    if (author && !anyAuthor) anyAuthor = author;
     if (imageUrl && !best.imageUrl) {
       best.imageUrl = imageUrl;
       best.imageIds = cand.altArticle ? [article.id, cand.altArticle.id] : [article.id];
     }
-    if (text.length > best.text.length) best = { ...best, text, url: cand.url, via: cand.via };
+    if (text.length > best.text.length) best = { ...best, text, url: cand.url, via: cand.via, author };
     if (text.length >= FULL_BODY_CHARS) break;
   }
+  if (!best.author) best.author = anyAuthor;
   return best;
 }
 
 /**
  * クラスタ内の全記事について本文取得を試みる（未試行か、前回試行から24時間経ったものだけ）。
- * 戻り値: { attempted, got, resolved }（got は今回新たに本文が取れた件数、
- * resolved は今回新たに実URLを解決できた件数）。クラスタがなければ null。
+ * 戻り値: { attempted, got, resolved, images, authors }（got は今回新たに本文が取れた件数、
+ * resolved は今回新たに実URLを解決できた件数、authors は今回新たに記者署名が取れた件数）。
+ * クラスタがなければ null。
  * オプション resolveGoogle=false でラッパーURL解決を無効化できる（計測・切り分け用）。
  */
 export async function fetchClusterBodies(db, clusterId, { fetchImpl = fetch, resolveGoogle = true } = {}) {
   const cluster = db.prepare('SELECT id FROM clusters WHERE id = ?').get(clusterId);
   if (!cluster) return null;
-  const articles = db.prepare('SELECT id, source, title, url, resolved_url, body_text, body_fetched_at FROM articles WHERE cluster_id = ?').all(clusterId);
+  const articles = db.prepare('SELECT id, source, title, url, resolved_url, body_text, body_fetched_at, author FROM articles WHERE cluster_id = ?').all(clusterId);
   const now = Date.now();
   const targets = articles.filter(
     (a) => !a.body_text && (!a.body_fetched_at || now - new Date(a.body_fetched_at).getTime() > RETRY_MS),
   );
-  const update = db.prepare('UPDATE articles SET body_text = ?, body_fetched_at = ?, body_url = ?, body_via = ? WHERE id = ?');
+  const update = db.prepare('UPDATE articles SET body_text = ?, body_fetched_at = ?, body_url = ?, body_via = ?, author = ? WHERE id = ?');
   const imgUpdate = db.prepare("UPDATE articles SET image_url = ?, image_via = 'og' WHERE id = ? AND image_url = ''");
   const imgAttempt = db.prepare('UPDATE articles SET image_fetched_at = ? WHERE id = ? AND image_fetched_at IS NULL');
   const ctx = { fetchImpl, resolveGoogle, resolveBudget: { left: MAX_RESOLUTIONS }, resolvedCount: 0 };
   let got = 0;
   let images = 0;
+  let authors = 0;
   await runPool(targets, MAX_PARALLEL, async (a) => {
     const best = await fetchArticleBody(db, a, articles, ctx);
     if (best.text) got++;
+    if (best.author && !a.author) authors++;
     const nowIso = new Date().toISOString();
-    update.run(best.text, nowIso, best.url, best.via, a.id);
+    update.run(best.text, nowIso, best.url, best.via, best.author || a.author || '', a.id);
     imgAttempt.run(nowIso, a.id); // og:image の取得も試行済みとして記録する（段階3の裏取得で再試行しない）
     if (best.imageUrl) {
       let credited = false;
@@ -395,8 +534,9 @@ export async function fetchClusterBodies(db, clusterId, { fetchImpl = fetch, res
       if (credited) images++;
     }
     if (best.text) { a.body_text = best.text; } // 同一クラスタ内のYahoo代替の再利用に備えてメモリ上も更新
+    if (best.author) { a.author = best.author; } // 同上（署名も再利用する）
   });
-  return { attempted: targets.length, got, resolved: ctx.resolvedCount, images };
+  return { attempted: targets.length, got, resolved: ctx.resolvedCount, images, authors };
 }
 
 // ---------- 段階3: 重要タブ上位クラスタの og:image 裏取得 ----------

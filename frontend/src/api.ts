@@ -46,6 +46,8 @@ interface RawArticle {
   body_via?: string
   /** サムネイル画像URL（RSS由来または og:image。参照表示のみ） */
   image_url?: string
+  /** 記者署名（バイライン）。本文取得時に抽出できた場合のみ入る */
+  author?: string
 }
 
 interface RawVersion {
@@ -258,7 +260,12 @@ function buildCoverages(
   const order: string[] = []
   const grouped = new Map<
     string,
-    { base: OutletCoverage; reports: string[]; bodies: string[] }
+    {
+      base: OutletCoverage
+      reports: string[]
+      bodies: string[]
+      bylines: { name: string; source: string }[]
+    }
   >()
   const counts = new Map<string, number>()
   for (const a of articles) {
@@ -283,9 +290,18 @@ function buildCoverages(
         },
         reports: [],
         bodies: [],
+        bylines: [],
       })
     }
     const g = grouped.get(o.id)!
+    // 記者署名: 取れた記事分だけ、名前＋媒体（DB上の source）の組で集める（重複は除く）
+    const author = (a.author ?? '').trim()
+    if (
+      author &&
+      !g.bylines.some((b) => b.name === author && b.source === a.source)
+    ) {
+      g.bylines.push({ name: author, source: a.source })
+    }
     // 同じ媒体の後続記事でラッパーURLの解決ができていれば、リンクはそちらを優先する
     if ((g.base.url ?? '').includes('news.google.com') && a.resolved_url) {
       g.base.url = safeUrl(a.resolved_url)
@@ -313,6 +329,7 @@ function buildCoverages(
     }
     const body = g.bodies.filter(Boolean).join('\n\n')
     if (body) coverage.body = body
+    if (g.bylines.length > 0) coverage.bylines = g.bylines
     const ed = byOutlet.get(id)
     if (ed) {
       coverage.editorial = ed.text
@@ -474,7 +491,8 @@ async function fetchJson<T>(url: string, init?: RequestInit): Promise<T> {
 
 /** タブ＋カテゴリ別の一覧を1ページ分取得する。UIの 'fresh' は API の 'new' に対応。
  *  mutedCategories は重要タブでのみサーバーへ渡す（他タブではサーバー側でも無視される）。
- *  watchKeywords は tab=watch のときだけ渡す（サーバー側で OR の部分一致になる）。 */
+ *  watchKeywords は tab=watch のときだけ渡す（サーバー側で OR の部分一致になる）。
+ *  reporter は tab=reporter のときだけ渡す（媒体＋記者名でサーバー側が絞り込む）。 */
 export async function fetchTabRows(
   tab: FeedTab,
   category: string,
@@ -482,6 +500,7 @@ export async function fetchTabRows(
   limit = 100,
   mutedCategories: string[] = [],
   watchKeywords: string[] = [],
+  reporter: { source: string; author: string } | null = null,
 ): Promise<StoriesPage> {
   // UIの 'search' はサーバー側では tab=watch（キーワード部分一致）として扱う
   const apiTab = tab === 'fresh' ? 'new' : tab === 'search' ? 'watch' : tab
@@ -496,6 +515,10 @@ export async function fetchTabRows(
   }
   if (apiTab === 'watch' && watchKeywords.length > 0) {
     params.set('keywords', watchKeywords.join(','))
+  }
+  if (apiTab === 'reporter' && reporter) {
+    params.set('source', reporter.source)
+    params.set('author', reporter.author)
   }
   const data = await fetchJson<{
     stories: RawStoryRow[]

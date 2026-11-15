@@ -32,6 +32,7 @@ CREATE TABLE IF NOT EXISTS articles (
   fetched_at TEXT NOT NULL,
   body_text TEXT NOT NULL DEFAULT '',
   body_fetched_at TEXT,
+  author TEXT NOT NULL DEFAULT '',
   resolved_url TEXT NOT NULL DEFAULT '',
   body_url TEXT NOT NULL DEFAULT '',
   body_via TEXT NOT NULL DEFAULT '',
@@ -98,6 +99,8 @@ export function openDb(path) {
   db.exec('CREATE INDEX IF NOT EXISTS idx_articles_cluster ON articles(cluster_id)');
   ensureColumn(db, 'articles', 'body_text', "TEXT NOT NULL DEFAULT ''");
   ensureColumn(db, 'articles', 'body_fetched_at', 'TEXT');
+  // 記者署名（バイライン）。本文取得時に抽出して保存する。取れなければ空（2026-11-15追加）
+  ensureColumn(db, 'articles', 'author', "TEXT NOT NULL DEFAULT ''");
   // GoogleニュースのラッパーURLから解決した実URLのキャッシュ
   ensureColumn(db, 'articles', 'resolved_url', "TEXT NOT NULL DEFAULT ''");
   // 本文を実際に取得したURLと経路（direct / resolved / yahoo）。出所の帰属表示に使う

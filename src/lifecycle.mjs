@@ -5,7 +5,8 @@
 // - VACUUM は起動時には行わず、refresh 時の prune 後に空きページ率が高い場合だけ自動実行する
 //   （手動実行は /api/maintenance から）。
 // - 保存済み本文には行単位のノイズ除去フィルタを後がけする（本文ノイズ除去、2026-11-15）。
-import { filterBodyLines } from './body.mjs';
+// - 本文が保存済みで未抽出の記事には、本文中の署名表記から記者名を後がけ抽出する（記者バイライン、2026-11-15）。
+import { filterBodyLines, extractAuthorFromText } from './body.mjs';
 
 export const RETENTION_DAYS = 7;
 export const FETCH_RUNS_KEPT = 30;
@@ -131,15 +132,40 @@ export function refilterBodies(db) {
   return changed;
 }
 
+/* ---------- 保存済み本文への記者署名の後がけ ---------- */
+
 /**
- * refresh 時に行うライフサイクル一式: 閲覧集計 → prune → fetch_runs 整理 → 本文の後がけ → 自動 VACUUM 判定。
- * 戻り値: { prunedClusters, foldedReads, refilteredBodies, vacuumed }
+ * 本文が保存済みで署名が未抽出の記事について、本文テキスト中の署名表記
+ * （（○○記者）・文・○○ 等）から記者名を抽出して articles.author に入れる。
+ * 取得HTMLは残っていないため、メタ情報（meta / JSON-LD）からの抽出はここではできない。
+ * 抽出できた記事数を返す。
+ */
+export function backfillAuthors(db) {
+  const rows = db.prepare("SELECT id, body_text FROM articles WHERE body_text != '' AND author = ''").all();
+  if (!rows.length) return 0;
+  const update = db.prepare('UPDATE articles SET author = ? WHERE id = ?');
+  let filled = 0;
+  db.exec('BEGIN IMMEDIATE');
+  try {
+    for (const r of rows) {
+      const name = extractAuthorFromText(r.body_text);
+      if (name) { update.run(name, r.id); filled++; }
+    }
+    db.exec('COMMIT');
+  } catch (e) { try { db.exec('ROLLBACK'); } catch {} throw e; }
+  return filled;
+}
+
+/**
+ * refresh 時に行うライフサイクル一式: 閲覧集計 → prune → fetch_runs 整理 → 本文の後がけ → 署名の後がけ → 自動 VACUUM 判定。
+ * 戻り値: { prunedClusters, foldedReads, refilteredBodies, backfilledAuthors, vacuumed }
  */
 export function runLifecycle(db, now = new Date()) {
   const foldedReads = foldOldReadEvents(db, now);
   const prunedClusters = pruneOldClusters(db, now);
   pruneFetchRuns(db);
   const refilteredBodies = refilterBodies(db);
+  const backfilledAuthors = backfillAuthors(db);
   const vacuumed = vacuumIfNeeded(db);
-  return { prunedClusters, foldedReads, refilteredBodies, vacuumed };
+  return { prunedClusters, foldedReads, refilteredBodies, backfilledAuthors, vacuumed };
 }

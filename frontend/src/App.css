@@ -715,6 +715,60 @@
   color: var(--vermillion);
 }
 
+/* 記者署名（バイライン）: 詳細の各紙見出しの下に出す */
+.paper-byline {
+  margin: -6px 0 12px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.byline-link {
+  margin-left: 8px;
+  padding: 0;
+  border: none;
+  background: none;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 650;
+  color: var(--vermillion);
+  cursor: pointer;
+}
+
+.byline-link:hover {
+  text-decoration: underline;
+}
+
+/* 記者ビュー（一覧上部のバナー） */
+.reporter-bar {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  flex-wrap: wrap;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--line);
+}
+
+.reporter-label {
+  font-size: 13px;
+  font-weight: 650;
+  color: var(--ink);
+}
+
+.reporter-close {
+  padding: 4px 12px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--paper);
+  color: var(--muted);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.reporter-close:hover {
+  color: var(--ink);
+}
+
 .paper-note {
   margin: 12px 0 0;
   font-size: 12px;

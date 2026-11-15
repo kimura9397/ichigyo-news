@@ -10,7 +10,7 @@ import { fileURLToPath } from 'node:url';
 import { openDb } from './src/db.mjs';
 import { refresh, fetchEditorials, checkTopEditorials } from './src/collector.mjs';
 import { fetchClusterBodies, fetchTopImages } from './src/body.mjs';
-import { addBookmark, removeBookmark, isBookmarked, recordRead, foldOldReadEvents, pruneOldClusters, pruneFetchRuns, refilterBodies } from './src/lifecycle.mjs';
+import { addBookmark, removeBookmark, isBookmarked, recordRead, foldOldReadEvents, pruneOldClusters, pruneFetchRuns, refilterBodies, backfillAuthors } from './src/lifecycle.mjs';
 
 const ROOT = dirname(fileURLToPath(import.meta.url));
 const PUBLIC_DIR = join(ROOT, 'public');
@@ -85,7 +85,7 @@ function likePattern(keyword) {
   return `%${keyword.replace(/[\\%_]/g, (ch) => `\\${ch}`)}%`;
 }
 
-function tabWhere(tab, category, muted = [], keywords = []) {
+function tabWhere(tab, category, muted = [], keywords = [], reporter = null) {
   const conds = [];
   const params = [];
   if (tab === 'important') {
@@ -125,6 +125,17 @@ function tabWhere(tab, category, muted = [], keywords = []) {
         const pattern = likePattern(kw);
         params.push(pattern, pattern, pattern);
       }
+    } else {
+      conds.push('1 = 0');
+    }
+  }
+  if (tab === 'reporter') {
+    // 記者ビュー: 指定した媒体（source）＋記者名（author）の記事があるクラスタの最新版行だけを出す。
+    // 同姓同名の別人を混ぜないため媒体で絞る。指定が無ければ一致なし（1 = 0）。
+    conds.push('v.version_no = (SELECT MAX(v2.version_no) FROM versions v2 WHERE v2.cluster_id = c.id)');
+    if (reporter && reporter.source && reporter.author) {
+      conds.push('EXISTS (SELECT 1 FROM articles ar WHERE ar.cluster_id = c.id AND ar.source = ? AND ar.author = ?)');
+      params.push(reporter.source, reporter.author);
     } else {
       conds.push('1 = 0');
     }
@@ -169,14 +180,14 @@ const ROWS_SELECT = `
     JOIN clusters c ON c.id = v.cluster_id
     JOIN articles a ON a.version_id = v.id`;
 
-function versionRows(tab, category, limit, offset, muted = [], keywords = []) {
-  const { where, params } = tabWhere(tab, category, muted, keywords);
+function versionRows(tab, category, limit, offset, muted = [], keywords = [], reporter = null) {
+  const { where, params } = tabWhere(tab, category, muted, keywords, reporter);
   return db.prepare(`${ROWS_SELECT} ${where} GROUP BY v.id ORDER BY ${tabOrder(tab)} LIMIT ? OFFSET ?`)
     .all(...params, limit, offset);
 }
 
-function versionTotal(tab, category, muted = [], keywords = []) {
-  const { where, params } = tabWhere(tab, category, muted, keywords);
+function versionTotal(tab, category, muted = [], keywords = [], reporter = null) {
+  const { where, params } = tabWhere(tab, category, muted, keywords, reporter);
   const row = db.prepare(`SELECT COUNT(*) AS total FROM (
     SELECT v.id FROM versions v JOIN clusters c ON c.id = v.cluster_id JOIN articles a ON a.version_id = v.id
     ${where} GROUP BY v.id)`).get(...params);
@@ -184,8 +195,8 @@ function versionTotal(tab, category, muted = [], keywords = []) {
 }
 
 /** タブ条件（カテゴリ絞りなし）でのカテゴリ別件数。空カテゴリは「その他」。 */
-function categoryCounts(tab, muted = [], keywords = []) {
-  const { where, params } = tabWhere(tab, null, muted, keywords);
+function categoryCounts(tab, muted = [], keywords = [], reporter = null) {
+  const { where, params } = tabWhere(tab, null, muted, keywords, reporter);
   const rows = db.prepare(`
     SELECT CASE WHEN c.category = '' THEN 'その他' ELSE c.category END AS category, COUNT(DISTINCT v.id) AS count
     FROM versions v JOIN clusters c ON c.id = v.cluster_id JOIN articles a ON a.version_id = v.id
@@ -203,7 +214,7 @@ async function apiStories(url) {
     kicked = kickRefreshIfStale();
   }
   const tabParam = url.searchParams.get('tab') || 'all';
-  const tab = ['important', 'new', 'all', 'bookmarks', 'editorials', 'watch'].includes(tabParam) ? tabParam : 'all';
+  const tab = ['important', 'new', 'all', 'bookmarks', 'editorials', 'watch', 'reporter'].includes(tabParam) ? tabParam : 'all';
   const catParam = url.searchParams.get('category') || 'すべて';
   const category = ['すべて', ...CATEGORIES].includes(catParam) ? catParam : 'すべて';
   const limit = Math.min(500, Math.max(1, Number.parseInt(url.searchParams.get('limit') || '100', 10) || 100));
@@ -222,14 +233,18 @@ async function apiStories(url) {
       .map((s) => s.trim().slice(0, 100))
       .filter(Boolean),
   )].slice(0, 20);
+  // 記者ビューの対象（媒体＋記者名）。両方そろった場合だけ reporter として tabWhere が使う。
+  const repSource = (url.searchParams.get('source') || '').trim().slice(0, 100);
+  const repAuthor = (url.searchParams.get('author') || '').trim().slice(0, 50);
+  const reporter = repSource && repAuthor ? { source: repSource, author: repAuthor } : null;
   return {
-    stories: versionRows(tab, category, limit, offset, muted, keywords),
-    total: versionTotal(tab, category, muted, keywords),
+    stories: versionRows(tab, category, limit, offset, muted, keywords, reporter),
+    total: versionTotal(tab, category, muted, keywords, reporter),
     limit,
     offset,
     refreshing: kicked || refreshing !== null,
     lastRun: lastFinishedRun(),
-    categories: categoryCounts(tab, muted, keywords),
+    categories: categoryCounts(tab, muted, keywords, reporter),
   };
 }
 
@@ -240,7 +255,7 @@ function apiStory(id) {
   const versions = db.prepare('SELECT * FROM versions WHERE cluster_id = ? ORDER BY version_no').all(id)
     .map((v) => ({
       ...v,
-      articles: db.prepare('SELECT source, title, url, resolved_url, summary, published_at, body_text, body_fetched_at, body_url, body_via, image_url FROM articles WHERE version_id = ? ORDER BY published_at').all(v.id),
+      articles: db.prepare('SELECT source, title, url, resolved_url, summary, published_at, body_text, body_fetched_at, body_url, body_via, image_url, author FROM articles WHERE version_id = ? ORDER BY published_at').all(v.id),
     }));
   const editorials = db.prepare('SELECT paper, found, title, summary, url, checked_at FROM editorials WHERE cluster_id = ?').all(id);
   return { cluster, versions, editorials };
@@ -326,14 +341,15 @@ const server = createServer(async (req, res) => {
       return recordRead(db, id) ? sendJson(res, 200, { ok: true }) : sendJson(res, 404, { error: 'not found' });
     }
     if (p === '/api/maintenance' && req.method === 'POST') {
-      // 手動整理: 保持期間 prune ＋ 閲覧集計 ＋ fetch_runs 整理 ＋ 本文ノイズ除去の後がけ ＋ VACUUM（強制）。前後の容量を返す
+      // 手動整理: 保持期間 prune ＋ 閲覧集計 ＋ fetch_runs 整理 ＋ 本文ノイズ除去の後がけ ＋ 記者署名の後がけ ＋ VACUUM（強制）。前後の容量を返す
       const before = dbBytes();
       const foldedReads = foldOldReadEvents(db);
       const prunedClusters = pruneOldClusters(db);
       pruneFetchRuns(db);
       const refilteredBodies = refilterBodies(db);
+      const backfilledAuthors = backfillAuthors(db);
       db.exec('VACUUM');
-      return sendJson(res, 200, { pruned_clusters: prunedClusters, folded_reads: foldedReads, refiltered_bodies: refilteredBodies, before_bytes: before, after_bytes: dbBytes() });
+      return sendJson(res, 200, { pruned_clusters: prunedClusters, folded_reads: foldedReads, refiltered_bodies: refilteredBodies, backfilled_authors: backfilledAuthors, before_bytes: before, after_bytes: dbBytes() });
     }
     if (p === '/api/status' && req.method === 'GET') {
       const counts = db.prepare('SELECT (SELECT COUNT(*) FROM clusters) AS clusters, (SELECT COUNT(*) FROM versions) AS versions, (SELECT COUNT(*) FROM articles) AS articles').get();

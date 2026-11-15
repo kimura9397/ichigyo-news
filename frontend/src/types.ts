@@ -21,6 +21,12 @@ export interface OutletCoverage {
   editorial?: string
   editorialTitle?: string
   editorialUrl?: string
+  /**
+   * 記者署名（バイライン）。署名が取れた記事がある場合のみ入る。
+   * source はDB上の媒体名で、「この記者の他の記事」の絞り込み（媒体＋同名）に使う。
+   * 記者の傾向の自動判定はしない（並べて読むのは利用者自身）。
+   */
+  bylines?: { name: string; source: string }[]
 }
 
 export interface StoryRow {
@@ -61,3 +67,4 @@ export type FeedTab =
   | 'bookmarks'
   | 'watch'
   | 'search'
+  | 'reporter'

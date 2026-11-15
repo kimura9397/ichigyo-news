@@ -17,6 +17,7 @@ import {
   fetchDbStatus,
   fetchEditorials,
   fetchTabRows,
+  outletOf,
   postReadEvent,
   refreshFeed,
   removeBookmark,
@@ -438,6 +439,34 @@ function App() {
     }
   }
 
+  // 記者ビュー（2026-11-15 ユーザー希望）: 詳細の署名から「同じ媒体＋同じ記者の他の記事」を開く。
+  // 同姓同名の別人を混ぜないため、絞り込みは媒体（DB上の source）＋記者名の組で行う。
+  // 記者の傾向の自動判定はしない（記事を並べて判断するのは利用者自身）。
+  const [reporterSel, setReporterSel] = useState<{
+    source: string
+    name: string
+  } | null>(null)
+  const reporterRef = useRef<{ source: string; name: string } | null>(null)
+
+  useEffect(() => {
+    reporterRef.current = reporterSel
+  }, [reporterSel])
+
+  function openReporter(source: string, name: string) {
+    acknowledgeNew()
+    setReporterSel({ source, name })
+    setTab('reporter')
+    setSelectedId(null)
+    setOutletId(null)
+    setCoverageKind('summary')
+    goToListPane()
+  }
+
+  function closeReporter() {
+    setReporterSel(null)
+    switchTab('important')
+  }
+
   /** 重要タブのカテゴリミュート切替。条件が変わるので重要タブのキャッシュは捨てる。 */
   function toggleMuteCategory(cat: string) {
     setMutedCategories((prev) =>
@@ -537,7 +566,9 @@ function App() {
       ? (watchKeyword ?? '__all__')
       : tab === 'search'
         ? `q:${searchQuery}`
-        : '',
+        : tab === 'reporter' && reporterSel
+          ? `r:${reporterSel.source}|${reporterSel.name}`
+          : '',
   )
   const page = pages[key] ?? null
 
@@ -548,7 +579,9 @@ function App() {
           ? (watchKeywordRef.current ?? '__all__')
           : target === 'search'
             ? `q:${searchQueryRef.current}`
-            : ''
+            : target === 'reporter' && reporterRef.current
+              ? `r:${reporterRef.current.source}|${reporterRef.current.name}`
+              : ''
       const watchKeywords =
         target === 'watch'
           ? watchKeywordRef.current
@@ -567,6 +600,14 @@ function App() {
           100,
           mutedRef.current,
           watchKeywords,
+          target === 'reporter'
+            ? reporterRef.current
+              ? {
+                  source: reporterRef.current.source,
+                  author: reporterRef.current.name,
+                }
+              : null
+            : null,
         )
         setRows((prev) => {
           const next = { ...prev }
@@ -1533,6 +1574,21 @@ function App() {
         </div>
       ) : null}
 
+      {tab === 'reporter' && reporterSel ? (
+        <div className="reporter-bar">
+          <span className="reporter-label">
+            {reporterSel.name}記者（{outletOf(reporterSel.source).name}）の記事
+          </span>
+          <button
+            type="button"
+            className="reporter-close"
+            onClick={closeReporter}
+          >
+            ✕ 閉じる
+          </button>
+        </div>
+      ) : null}
+
       {tab === 'watch' ? (
         <div className="watch-bar" role="tablist" aria-label="キーワード">
           <button
@@ -1579,15 +1635,17 @@ function App() {
           ) : visible.length === 0 ? (
             <p className="empty">
               {loadError ??
-                (tab === 'search' && !searchQuery
-                  ? '上の入力欄にキーワードを入れて検索してください。一致はクラスタと記事の見出し・要約が対象です。'
-                  : tab === 'search'
-                    ? `「${searchQuery}」に一致するニュースはありません。`
-                    : tab === 'watch' && keywords.length === 0
-                      ? 'キーワードが登録されていません。設定メニュー（右上のハンバーガー）からキーワードを登録してください。'
-                      : tab === 'watch' && watchKeyword
-                        ? `「${watchKeyword}」に一致するニュースはまだありません。`
-                        : 'この条件に表示するニュースはありません。')}
+                (tab === 'reporter' && reporterSel
+                  ? `${reporterSel.name}記者（${outletOf(reporterSel.source).name}）の記事はまだありません。`
+                  : tab === 'search' && !searchQuery
+                    ? '上の入力欄にキーワードを入れて検索してください。一致はクラスタと記事の見出し・要約が対象です。'
+                    : tab === 'search'
+                      ? `「${searchQuery}」に一致するニュースはありません。`
+                      : tab === 'watch' && keywords.length === 0
+                        ? 'キーワードが登録されていません。設定メニュー（右上のハンバーガー）からキーワードを登録してください。'
+                        : tab === 'watch' && watchKeyword
+                          ? `「${watchKeyword}」に一致するニュースはまだありません。`
+                          : 'この条件に表示するニュースはありません。')}
             </p>
           ) : (
             <>
@@ -1807,6 +1865,26 @@ function App() {
                       </time>
                     </p>
                     <h3>{activeOutlet.headline}</h3>
+                    {effectiveKind !== 'editorial' &&
+                    activeOutlet.bylines &&
+                    activeOutlet.bylines.length > 0 ? (
+                      <p className="paper-byline">
+                        記者：
+                        {activeOutlet.bylines.map((b, i) => (
+                          <span key={`${b.source}|${b.name}`}>
+                            {i > 0 ? '、' : ''}
+                            {b.name}
+                            <button
+                              type="button"
+                              className="byline-link"
+                              onClick={() => openReporter(b.source, b.name)}
+                            >
+                              この記者の他の記事
+                            </button>
+                          </span>
+                        ))}
+                      </p>
+                    ) : null}
                     {effectiveKind === 'editorial' ? (
                       editorialLoading ? (
                         <p className="paper-note">社説を確認中…</p>
