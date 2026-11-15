@@ -18,7 +18,12 @@
   /* 色を薄める方向の混色ベース（ダークテーマでは暗い色に差し替える） */
   --tint-base: #ffffff;
   --serif: 'Iowan Old Style', 'Hiragino Mincho ProN', 'Yu Mincho', serif;
-  --sans: 'Hiragino Sans', 'Yu Gothic UI', system-ui, sans-serif;
+  /* ゴシック系スタック（2026-11-15 是正）。Windows で本文サイズでも掠れないことを
+     最優先に組む: Mac は Hiragino Sans、次に Noto Sans JP、Windows の游ゴシックは
+     素の Regular が細すぎるため下の @font-face 差し替え（'Yu Gothic Remap'）経由にし、
+     素の Yu Gothic UI / Yu Gothic はその後ろに保険として残す */
+  --sans: 'Hiragino Sans', 'Hiragino Kaku Gothic ProN', 'Noto Sans JP',
+    'Yu Gothic Remap', 'Yu Gothic UI', 'Yu Gothic', system-ui, sans-serif;
   --mono: ui-monospace, 'Cascadia Mono', monospace;
   font: 15px/1.6 var(--sans);
   color: var(--ink);
@@ -27,6 +32,24 @@
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
+}
+
+/* 游ゴシックのウェイト差し替え（Windows 対策、2026-11-15 ユーザー実機確認）。
+   Yu Gothic の Regular (400) は字形が細く、Chrome では本文サイズで掠れて見える。
+   実フォントの Medium を 400 に、Bold を 700 に割り当てた別名ファミリを用意し、
+   --sans では素の Yu Gothic UI / Yu Gothic より前に置く。
+   CSS のマッチング規則により 500 は 400（=Medium）、650 は 700（=Bold）が選ばれる。
+   Yu Gothic の無い環境（Mac 等）ではこのファミリは解決されず、スタックの前段が効く。 */
+@font-face {
+  font-family: 'Yu Gothic Remap';
+  src: local('Yu Gothic Medium'), local('YuGothic-Medium');
+  font-weight: 400;
+}
+
+@font-face {
+  font-family: 'Yu Gothic Remap';
+  src: local('Yu Gothic Bold'), local('YuGothic-Bold');
+  font-weight: 700;
 }
 
 * {

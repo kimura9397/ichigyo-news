@@ -303,6 +303,8 @@
 
 .detail-head h2 {
   margin: 0 0 8px;
+  /* 詳細タイトルは大きな見出しとして明朝を維持する（ブランド要素）。
+     明朝を使ってよいのは、この見出しとマストヘッドのタイトルだけ（test/font-stack.test.mjs で固定） */
   font-family: var(--serif);
   font-size: var(--fs-detail-title);
   line-height: 1.35;
@@ -417,7 +419,10 @@
 
 .paper h3 {
   margin: 0 0 14px;
-  font-family: var(--serif);
+  /* 各紙の見出しは繰り返し読む本文系テキストなので明朝にしない（2026-11-15 是正）。
+     明朝をやめた分、見出しの存在感はウェイトで保つ */
+  font-family: var(--sans);
+  font-weight: 700;
   font-size: var(--fs-paper-title);
   line-height: 1.4;
 }
@@ -1257,12 +1262,13 @@
   color: var(--paper);
 }
 
-/* 社説ビューで「どの媒体の社説か」を本文冒頭に明示する見出し */
+/* 社説ビューで「どの媒体の社説か」を本文冒頭に明示する見出し。
+   15px は本文サイズなので明朝にしない（2026-11-15 是正） */
 .paper-owner {
   margin: 0 0 12px;
   padding-inline-start: 10px;
   border-inline-start: 3px solid var(--vermillion);
-  font-family: var(--serif);
+  font-family: var(--sans);
   font-size: calc(15px * var(--font-scale));
   font-weight: 700;
   color: var(--ink);
