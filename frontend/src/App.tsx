@@ -106,15 +106,14 @@ type FontSizeSetting = 'small' | 'medium' | 'large'
  */
 const THEME_PRESETS = [
   { id: 'kami', label: '紙', title: '紙色の背景に墨の文字、朱の差し色（これまでのライト）', color: '#f4eee3' },
+  { id: 'sumi', label: '墨', title: '暗い地に明るい文字（これまでのダーク）', color: '#262019' },
   { id: 'koshi', label: '古紙', title: '茶色く沈めた、古い紙のような明るい色', color: '#efddba' },
   { id: 'shirokuro', label: '白黒', title: '純白と真っ黒の高コントラスト', color: '#ffffff' },
-  { id: 'akari', label: '灯', title: '墨より一段明るい、灯りの下で読むような暗さ', color: '#453b30' },
-  { id: 'sumi', label: '墨', title: '柔らかい暗茶の地に明るい文字（ダーク）', color: '#38322a' },
   {
     id: 'system',
     label: '端末に合わせる',
     title: '端末がライトなら「紙」、ダークなら「墨」',
-    color: 'linear-gradient(90deg, #f4eee3 50%, #38322a 50%)',
+    color: 'linear-gradient(90deg, #f4eee3 50%, #262019 50%)',
   },
 ] as const
 type ThemePreset = (typeof THEME_PRESETS)[number]['id']

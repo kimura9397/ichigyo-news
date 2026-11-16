@@ -1,5 +1,7 @@
 // ニュースアプリ サーバー（Node標準のみ）。
 // 起動: node server.mjs  （PORT / HOST / ACCESS_TOKEN / NEWS_DB_PATH 環境変数で変更可、既定 8787 / 全インターフェース / 無認証 / data/news.db）
+// SEA（単一 exe）として実行した場合は、静的ファイルを埋め込み assets から返し、
+// DB はユーザーデータ領域（ICHIGYO_DATA_DIR で上書き可）に置き、既定ブラウザを開く。
 // 収集は「開いた時だけ」: データがあれば即返し、古ければ背後で更新する（stale-while-revalidate）。
 // DBが空の初回だけ収集を待つ。
 import { createServer } from 'node:http';
@@ -13,13 +15,24 @@ import { fetchClusterBodies, fetchTopImages } from './src/body.mjs';
 import { addBookmark, removeBookmark, isBookmarked, recordRead, foldOldReadEvents, pruneOldClusters, pruneFetchRuns, refilterBodies, backfillAuthors, splitOverMergedClusters, reevaluateEditorials, refreshSearchText, refreshExtracts } from './src/lifecycle.mjs';
 import { normalizeForSearch } from './src/normalize.mjs';
 import { listKeywords, addKeyword as addKeywordToDb, removeKeyword as removeKeywordFromDb } from './src/keywords.mjs';
+import { runningAsSea, readSeaAsset, defaultDataDir, openBrowser } from './src/sea.mjs';
 
-const ROOT = dirname(fileURLToPath(import.meta.url));
+// SEA 実行時は import.meta.url が得られないため、その場合は cwd を基点にする
+// （SEA では静的配信も DB パスも ROOT を使わないので、基点はダミーでよい）。
+let ROOT;
+try {
+  ROOT = dirname(fileURLToPath(import.meta.url));
+} catch {
+  ROOT = process.cwd();
+}
 const PUBLIC_DIR = join(ROOT, 'public');
 const PORT = Number(process.env.PORT || 8787);
 const HOST = process.env.HOST || undefined; // 未指定なら全インターフェースで待ち受け
 const ACCESS_TOKEN = process.env.ACCESS_TOKEN || '';
-const DB_PATH = process.env.NEWS_DB_PATH || join(ROOT, 'data', 'news.db');
+const AS_SEA = runningAsSea();
+// DB の置き場所: NEWS_DB_PATH が最優先。SEA ではユーザーデータ領域、それ以外は従来の data/news.db
+const DB_PATH = process.env.NEWS_DB_PATH
+  || (AS_SEA ? join(defaultDataDir(), 'news.db') : join(ROOT, 'data', 'news.db'));
 const db = openDb(DB_PATH);
 // 検索用シャドウテキスト（title_norm / search_text）を起動時に現在値へ揃える
 // （旧バージョンで作られたDBや、直接投入された行でも検索が効くように）。
@@ -406,7 +419,14 @@ const server = createServer(async (req, res) => {
     if (file !== PUBLIC_DIR && !file.startsWith(PUBLIC_DIR + sep)) {
       res.writeHead(403, SECURITY_HEADERS); return res.end('forbidden');
     }
-    const body = await readFile(file);
+    // SEA では埋め込み assets から、それ以外はディスクから読む（パストラバーサル検査は両方に効かせる）
+    let body;
+    if (AS_SEA) {
+      body = readSeaAsset(rel.split(sep).join('/'));
+      if (body === null) { res.writeHead(404, SECURITY_HEADERS); return res.end('not found'); }
+    } else {
+      body = await readFile(file);
+    }
     res.writeHead(200, { 'content-type': MIME[extname(file)] || 'application/octet-stream', ...SECURITY_HEADERS });
     res.end(body);
   } catch (e) {
@@ -416,4 +436,10 @@ const server = createServer(async (req, res) => {
   }
 });
 
-server.listen(PORT, HOST, () => console.log(`ichigyo-news: http://localhost:${PORT} で開いてください（待ち受け: ${HOST || '全インターフェース'}:${PORT}）`));
+server.listen(PORT, HOST, () => {
+  console.log(`ichigyo-news: http://localhost:${PORT} で開いてください（待ち受け: ${HOST || '全インターフェース'}:${PORT}）`);
+  if (AS_SEA) {
+    console.log(`データの保存先: ${DB_PATH}`);
+    openBrowser(`http://localhost:${PORT}`);
+  }
+});

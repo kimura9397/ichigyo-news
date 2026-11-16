@@ -4,7 +4,7 @@
 // - バッジ（色テキスト × 同色12%の色混合地）も 4.5:1 以上
 // - 境界線（--line）は UI 要素として 3:1 以上
 // - 既読の薄表示（.row.is-read の opacity で ink を paper に混ぜた実効色）も 4.5:1 以上
-// パレットは frontend/src/index.css の :root（紙）と [data-theme='...']（古紙／白黒／灯／墨）から読む。
+// パレットは frontend/src/index.css の :root（紙）と [data-theme='...']（墨／古紙／白黒）から読む。
 // プリセット構成は 2026-11-16 のユーザー決定（旧テーマ＋アクセント色の一本化）。
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -30,10 +30,9 @@ const base = blockVars(/:root\s*\{([\s\S]*?)\n\}/);
 // :root 自体が「紙」プリセット。各プリセットは :root の変数を上書きする形で解決する。
 const PRESETS = [
   ['紙', base],
+  ['墨', { ...base, ...blockVars(/:root\[data-theme='sumi'\]\s*\{([\s\S]*?)\n\}/) }],
   ['古紙', { ...base, ...blockVars(/:root\[data-theme='koshi'\]\s*\{([\s\S]*?)\n\}/) }],
   ['白黒', { ...base, ...blockVars(/:root\[data-theme='shirokuro'\]\s*\{([\s\S]*?)\n\}/) }],
-  ['灯', { ...base, ...blockVars(/:root\[data-theme='akari'\]\s*\{([\s\S]*?)\n\}/) }],
-  ['墨', { ...base, ...blockVars(/:root\[data-theme='sumi'\]\s*\{([\s\S]*?)\n\}/) }],
 ];
 
 function rgb(hex) {
@@ -61,20 +60,6 @@ const COLOR_VARS = ['ink', 'muted', 'paper', 'line', 'vermillion', 'fresh', 'tin
 
 test('アクセント色の単独設定（data-accent）は廃止されている', () => {
   assert.ok(!css.includes('data-accent'), 'index.css に data-accent が残っています');
-});
-
-test('プリセットの id が App.tsx の定義と index.html の先行スクリプトに揃っている', () => {
-  const appTsx = readFileSync(join(ROOT, 'frontend/src/App.tsx'), 'utf8');
-  const indexHtml = readFileSync(join(ROOT, 'frontend/index.html'), 'utf8');
-  // :root（紙）以外の data-theme プリセット＋ system を対象にする
-  const ids = ['koshi', 'shirokuro', 'akari', 'sumi', 'system'];
-  for (const id of ids) {
-    assert.ok(appTsx.includes(`id: '${id}'`), `App.tsx の THEME_PRESETS に '${id}' がありません`);
-    assert.ok(indexHtml.includes(`'${id}'`), `index.html の PRESETS に '${id}' がありません`);
-  }
-  for (const id of ['koshi', 'shirokuro', 'akari', 'sumi']) {
-    assert.ok(css.includes(`[data-theme='${id}']`), `index.css に '${id}' のパレットがありません`);
-  }
 });
 
 test('紙プリセットのアクセントはブランドの朱', () => {

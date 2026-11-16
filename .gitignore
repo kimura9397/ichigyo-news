@@ -6,6 +6,9 @@ node_modules/
 frontend/node_modules/
 frontend/dist/
 
+# SEA 配布物のビルド成果物
+dist/
+
 # ログ
 *.log
 

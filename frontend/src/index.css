@@ -95,37 +95,17 @@ button:focus-visible {
    ライト→紙、ダーク→墨 に解決してから入る）。既定の :root が「紙」。
    どのプリセットもコントラスト基準（test/theme-contrast.test.mjs）を満たすこと。 */
 
-/* 墨: 暗色のパレット（旧ダーク相当）。
-   2026-11-16 是正: 実機で「黒すぎて見づらい」との指摘を受け、地の明度を上げて
-   柔らかい暗茶に寄せた（paper #262019 → #38322a、文字との対比は 12.8:1 → 9.6:1）。
-   基準（テキスト 4.5:1 以上など）は従来どおり満たす。 */
+/* 墨: 暗色のパレット（旧ダーク相当） */
 :root[data-theme='sumi'] {
-  --ink: #e9dfc9;
-  --muted: #b3a58d;
-  --paper: #38322a;
-  --line: #8f7d62;
-  --vermillion: #f7a48f;
-  --fresh: #6cc9b8;
+  --ink: #ece4d4;
+  --muted: #a89b87;
+  --paper: #262019;
+  --line: #77694f;
+  --vermillion: #ec8474;
+  --fresh: #4cb3a5;
   --shadow: 0 10px 30px rgb(0 0 0 / 0.45);
-  --tint-base: #403930;
-  background: #2b2620;
-  color-scheme: dark;
-}
-
-/* 灯: 墨より一段明るい暖色系ダーク（2026-11-16 追加、GitHub の Dark Dimmed 相当）。
-   夜に灯りの下で長く読む用途を想定し、地は中暗色、全体のコントラストは墨より
-   やや落としてある（文字対比 9.1:1）。「端末に合わせる」のダーク側は従来どおり墨で、
-   灯は手動選択専用。 */
-:root[data-theme='akari'] {
-  --ink: #f3ead3;
-  --muted: #c9b797;
-  --paper: #453b30;
-  --line: #a68f68;
-  --vermillion: #ffb59d;
-  --fresh: #85d6c4;
-  --shadow: 0 10px 30px rgb(0 0 0 / 0.38);
-  --tint-base: #4a4034;
-  background: #362f27;
+  --tint-base: #2e2822;
+  background: #171310;
   color-scheme: dark;
 }
 

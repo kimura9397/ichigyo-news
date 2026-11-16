@@ -11,11 +11,10 @@
       // テーマとフォントサイズは描画前に適用し、ちらつきを防ぐ（設定は localStorage の ichigyo:* ）
       try {
         // テーマプリセット（2026-11-16〜）: ichigyo:themePreset に
-        // kami（紙）/ koshi（古紙）/ shirokuro（白黒）/ akari（灯）/ sumi（墨）/
-        // system（端末）を保存する。
+        // kami（紙）/ sumi（墨）/ koshi（古紙）/ shirokuro（白黒）/ system（端末）を保存する。
         // 旧キー（ichigyo:theme / ichigyo:accent）しか無い場合はここで移行する
         // （ダーク→墨、端末→system、それ以外→紙。アクセント単独設定は廃止）。
-        var PRESETS = ['kami', 'koshi', 'shirokuro', 'akari', 'sumi', 'system']
+        var PRESETS = ['kami', 'sumi', 'koshi', 'shirokuro', 'system']
         var p = localStorage.getItem('ichigyo:themePreset')
         if (PRESETS.indexOf(p) < 0) {
           var old = localStorage.getItem('ichigyo:theme')
@@ -41,8 +40,8 @@
         /* 読めなければ既定（紙／中）で表示する */
       }
     </script>
-    <script type="module" crossorigin src="/assets/index-Bzsikirw.js"></script>
-    <link rel="stylesheet" crossorigin href="/assets/index-Dhupn1Bv.css">
+    <script type="module" crossorigin src="/assets/index-DJV7ErUd.js"></script>
+    <link rel="stylesheet" crossorigin href="/assets/index-DEJptreB.css">
   </head>
   <body>
     <div id="root"></div>
