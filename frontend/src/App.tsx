@@ -1946,6 +1946,18 @@ function App() {
                 </time>
               </p>
               <p className="detail-lead">{selected.lead}</p>
+              {showThumbs && selected.imageUrl ? (
+                <img
+                  className="detail-photo"
+                  src={selected.imageUrl}
+                  alt=""
+                  loading="lazy"
+                  referrerPolicy="no-referrer"
+                  onError={(e) => {
+                    e.currentTarget.style.display = 'none'
+                  }}
+                />
+              ) : null}
               <div className="detail-actions">
                 <button
                   type="button"

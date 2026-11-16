@@ -331,6 +331,18 @@
   line-height: 1.35;
 }
 
+/* 詳細ヘッダーの写真（一覧サムネイルと同じ代表画像）。見出しブロックの下に
+   通常フローで置き、本文テキストの表示幅は狭めない（float の回り込みはしない）。 */
+.detail-photo {
+  display: block;
+  width: 100%;
+  max-height: 280px;
+  object-fit: cover;
+  border-radius: 6px;
+  margin-top: 12px;
+  background: color-mix(in srgb, var(--line) 45%, var(--tint-base));
+}
+
 .detail-actions {
   margin-top: 12px;
 }
