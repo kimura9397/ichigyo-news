@@ -18,7 +18,21 @@
 
 更新情報と連絡先は X の [@ichigyo_news](https://x.com/ichigyo_news) です。要望・不具合の報告は X までお願いします。
 
-<!-- スクリーンショット差し込み位置: docs/images/pc-list.png（PCの一覧/詳細）、docs/images/mobile.png（スマホ表示）。撮影でき次第ここに並べる。 -->
+![PCの一覧と詳細](docs/images/pc.png)
+
+PC では一覧と詳細を並べる。
+
+![スマホ幅の一覧](docs/images/mobile.png)
+
+スマホ幅では一覧と詳細を別画面に分け、スワイプで行き来する。
+
+![スマホ幅の詳細](docs/images/mobile-detail.png)
+
+スマホ幅の詳細。版はチップで切り替える。
+
+![設定メニューを開いた状態](docs/images/pc-settings.png)
+
+テーマは紙・古紙・白黒・灯・墨から選べる。
 
 ## 仕組み
 
