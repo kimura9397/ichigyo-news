@@ -1,10 +1,11 @@
-// テーマのコントラスト監査（WCAG AA 相当を数値で固定する）。
-// - 通常テキストのペアは 4.5:1 以上（ink / muted / 朱色アクセント / fresh の各前景 × paper / 背景）
-// - 朱色地の上の文字（危険ボタン等）も 4.5:1 以上
-// - バッジ（アクセント色テキスト × 同色12%の色混合地）も 4.5:1 以上
+// テーマプリセットのコントラスト監査（WCAG AA 相当を数値で固定する）。
+// - 通常テキストのペアは 4.5:1 以上（ink / muted / アクセント / fresh の各前景 × paper / 背景）
+// - アクセント地の上の文字も 4.5:1 以上
+// - バッジ（色テキスト × 同色12%の色混合地）も 4.5:1 以上
 // - 境界線（--line）は UI 要素として 3:1 以上
 // - 既読の薄表示（.row.is-read の opacity で ink を paper に混ぜた実効色）も 4.5:1 以上
-// パレットは frontend/src/index.css の :root（ライト）と [data-theme='dark']（ダーク）から読む。
+// パレットは frontend/src/index.css の :root（紙）と [data-theme='...']（古紙／白黒／灯／墨）から読む。
+// プリセット構成は 2026-11-16 のユーザー決定（旧テーマ＋アクセント色の一本化）。
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
@@ -25,9 +26,15 @@ function blockVars(selectorRe) {
   return vars;
 }
 
-const light = blockVars(/:root\s*\{([\s\S]*?)\n\}/);
-const darkOverrides = blockVars(/:root\[data-theme='dark'\]\s*\{([\s\S]*?)\n\}/);
-const dark = { ...light, ...darkOverrides };
+const base = blockVars(/:root\s*\{([\s\S]*?)\n\}/);
+// :root 自体が「紙」プリセット。各プリセットは :root の変数を上書きする形で解決する。
+const PRESETS = [
+  ['紙', base],
+  ['古紙', { ...base, ...blockVars(/:root\[data-theme='koshi'\]\s*\{([\s\S]*?)\n\}/) }],
+  ['白黒', { ...base, ...blockVars(/:root\[data-theme='shirokuro'\]\s*\{([\s\S]*?)\n\}/) }],
+  ['灯', { ...base, ...blockVars(/:root\[data-theme='akari'\]\s*\{([\s\S]*?)\n\}/) }],
+  ['墨', { ...base, ...blockVars(/:root\[data-theme='sumi'\]\s*\{([\s\S]*?)\n\}/) }],
+];
 
 function rgb(hex) {
   return [0, 2, 4].map((i) => parseInt(hex.slice(1).slice(i, i + 2), 16));
@@ -50,47 +57,37 @@ function mix(hex1, p, hex2) {
 
 const TEXT_MIN = 4.5;
 const UI_MIN = 3.0;
+const COLOR_VARS = ['ink', 'muted', 'paper', 'line', 'vermillion', 'fresh', 'tint-base'];
 
-// アクセント色（data-accent の --vermillion 上書き）: 朱以外の選択肢が両テーマ分の値を持ち、
-// 朱色と同じペア基準を満たすことを固定する。
-const accentLight = new Map();
-const accentDark = new Map();
-for (const m of css.matchAll(/:root\[data-accent='(\w+)'\]\s*\{\s*--vermillion:\s*(#[0-9a-fA-F]{6})/g)) {
-  accentLight.set(m[1], m[2]);
-}
-for (const m of css.matchAll(/:root\[data-theme='dark'\]\[data-accent='(\w+)'\]\s*\{\s*--vermillion:\s*(#[0-9a-fA-F]{6})/g)) {
-  accentDark.set(m[1], m[2]);
-}
+test('アクセント色の単独設定（data-accent）は廃止されている', () => {
+  assert.ok(!css.includes('data-accent'), 'index.css に data-accent が残っています');
+});
 
-test('アクセント色の選択肢が両テーマ分の値を持つ', () => {
-  assert.ok(accentLight.size >= 3, `アクセントの選択肢が少なすぎます: ${accentLight.size}`);
-  for (const id of accentLight.keys()) {
-    assert.ok(accentDark.has(id), `アクセント ${id} のダーク値がありません`);
+test('プリセットの id が App.tsx の定義と index.html の先行スクリプトに揃っている', () => {
+  const appTsx = readFileSync(join(ROOT, 'frontend/src/App.tsx'), 'utf8');
+  const indexHtml = readFileSync(join(ROOT, 'frontend/index.html'), 'utf8');
+  // :root（紙）以外の data-theme プリセット＋ system を対象にする
+  const ids = ['koshi', 'shirokuro', 'akari', 'sumi', 'system'];
+  for (const id of ids) {
+    assert.ok(appTsx.includes(`id: '${id}'`), `App.tsx の THEME_PRESETS に '${id}' がありません`);
+    assert.ok(indexHtml.includes(`'${id}'`), `index.html の PRESETS に '${id}' がありません`);
+  }
+  for (const id of ['koshi', 'shirokuro', 'akari', 'sumi']) {
+    assert.ok(css.includes(`[data-theme='${id}']`), `index.css に '${id}' のパレットがありません`);
   }
 });
 
-for (const [id, lightValue] of accentLight) {
-  test(`アクセント ${id}: 両テーマで ${TEXT_MIN}:1 以上`, () => {
-    const darkValue = accentDark.get(id);
-    const pairs = [
-      ['ライト accent/paper', lightValue, light.paper],
-      ['ライト accent/bg', lightValue, light.__bg],
-      ['ライト paper/accent', light.paper, lightValue],
-      ['ライト バッジ', lightValue, mix(lightValue, 0.12, light['tint-base'])],
-      ['ダーク accent/paper', darkValue, dark.paper],
-      ['ダーク accent/bg', darkValue, dark.__bg],
-      ['ダーク paper/accent', dark.paper, darkValue],
-      ['ダーク バッジ', darkValue, mix(darkValue, 0.12, dark['tint-base'])],
-    ];
-    for (const [label, fg, bg] of pairs) {
-      const r = contrast(fg, bg);
-      assert.ok(r >= TEXT_MIN, `${label} = ${r.toFixed(2)} < ${TEXT_MIN}`);
-    }
-  });
-}
+test('紙プリセットのアクセントはブランドの朱', () => {
+  assert.equal(base.vermillion, '#b13224');
+});
 
-for (const [name, t] of [['ライト', light], ['ダーク', dark]]) {
-  test(`${name}テーマ: テキストペアが ${TEXT_MIN}:1 以上`, () => {
+for (const [name, t] of PRESETS) {
+  test(`${name}プリセット: パレットの色変数が揃っている`, () => {
+    for (const v of COLOR_VARS) assert.ok(t[v], `${name} の --${v} が読めません`);
+    assert.ok(t.__bg, `${name} の background が読めません`);
+  });
+
+  test(`${name}プリセット: テキストペアが ${TEXT_MIN}:1 以上`, () => {
     const pairs = [
       ['ink/paper', t.ink, t.paper],
       ['ink/bg', t.ink, t.__bg],
@@ -99,16 +96,15 @@ for (const [name, t] of [['ライト', light], ['ダーク', dark]]) {
       ['vermillion/paper', t.vermillion, t.paper],
       ['vermillion/bg', t.vermillion, t.__bg],
       ['fresh/paper', t.fresh, t.paper],
-      ['paper/vermillion（朱地の文字）', t.paper, t.vermillion],
+      ['paper/vermillion（アクセント地の文字）', t.paper, t.vermillion],
     ];
     for (const [label, fg, bg] of pairs) {
-      assert.ok(fg && bg, `${label} の色が読めません`);
       const r = contrast(fg, bg);
       assert.ok(r >= TEXT_MIN, `${name} ${label} = ${r.toFixed(2)} < ${TEXT_MIN}`);
     }
   });
 
-  test(`${name}テーマ: バッジ（色混合地）が ${TEXT_MIN}:1 以上、境界線が ${UI_MIN}:1 以上`, () => {
+  test(`${name}プリセット: バッジ（色混合地）が ${TEXT_MIN}:1 以上、境界線が ${UI_MIN}:1 以上`, () => {
     const badgeImportant = contrast(t.vermillion, mix(t.vermillion, 0.12, t['tint-base']));
     assert.ok(badgeImportant >= TEXT_MIN, `${name} 重要バッジ = ${badgeImportant.toFixed(2)}`);
     const badgeFresh = contrast(t.fresh, mix(t.fresh, 0.12, t['tint-base']));
@@ -117,7 +113,7 @@ for (const [name, t] of [['ライト', light], ['ダーク', dark]]) {
     assert.ok(contrast(t.line, t.__bg) >= UI_MIN, `${name} line/bg = ${contrast(t.line, t.__bg).toFixed(2)}`);
   });
 
-  test(`${name}テーマ: 既読の薄表示でも ${TEXT_MIN}:1 以上`, () => {
+  test(`${name}プリセット: 既読の薄表示でも ${TEXT_MIN}:1 以上`, () => {
     const m = appCss.match(/\.row\.is-read\s*\{\s*opacity:\s*([\d.]+)/);
     assert.ok(m, '.row.is-read の opacity が読めません');
     const opacity = Number(m[1]);

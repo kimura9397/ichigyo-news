@@ -303,9 +303,9 @@
 
 .detail-head h2 {
   margin: 0 0 8px;
-  /* 詳細タイトルは大きな見出しとして明朝を維持する（ブランド要素）。
-     明朝を使ってよいのは、この見出しとマストヘッドのタイトルだけ（test/font-stack.test.mjs で固定） */
-  font-family: var(--serif);
+  /* 詳細タイトルもゴシック（2026-11-16 ユーザー決定）。明朝を使ってよいのは
+     マストヘッドのブランド表示（.brand h1）だけ（test/font-stack.test.mjs で固定） */
+  font-family: var(--sans);
   font-size: var(--fs-detail-title);
   line-height: 1.35;
 }
@@ -648,14 +648,14 @@
   box-shadow: 0 1px 3px rgb(0 0 0 / 0.18);
 }
 
-/* アクセント色の色見本（設定メニュー） */
-.accent-swatches {
+/* テーマプリセットの色見本（設定メニュー） */
+.preset-swatches {
   display: flex;
   flex-wrap: wrap;
   gap: 4px;
 }
 
-.accent-swatch {
+.preset-swatch {
   display: inline-flex;
   align-items: center;
   gap: 5px;
@@ -669,14 +669,16 @@
   cursor: pointer;
 }
 
-.accent-swatch .accent-dot {
+.preset-swatch .preset-dot {
   width: 12px;
   height: 12px;
   border-radius: 50%;
   flex: 0 0 auto;
+  /* 紙・白黒のような明るい色見本が地に埋もれないように輪郭を付ける */
+  border: 1px solid var(--line);
 }
 
-.accent-swatch.is-active {
+.preset-swatch.is-active {
   color: var(--ink);
   border-color: var(--vermillion);
   box-shadow: inset 0 0 0 1px var(--vermillion);

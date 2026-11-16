@@ -88,46 +88,69 @@ button:focus-visible {
   --font-scale: 1.12;
 }
 
-/* ダークテーマ（2026-11-15 ユーザー決定）。朱色アクセント等のデザイン言語は保ち、
-   地と文字のパレットだけを暗色に差し替える。<html data-theme='dark'> で有効化 */
-:root[data-theme='dark'] {
-  --ink: #ece4d4;
-  --muted: #a89b87;
-  --paper: #262019;
-  --line: #77694f;
-  --vermillion: #ec8474;
-  --fresh: #4cb3a5;
+/* テーマプリセット（2026-11-16 ユーザー決定）。かつての「テーマ（ライト/ダーク/端末）」と
+   「アクセント色（5色）」の別々設定をやめ、プリセット選択に一本化した。
+   各プリセットがパレット全体（--paper/--ink/--muted/--line/--vermillion 等）を決める。
+   <html data-theme> には解決済みのプリセット名が入る（「端末に合わせる」は
+   ライト→紙、ダーク→墨 に解決してから入る）。既定の :root が「紙」。
+   どのプリセットもコントラスト基準（test/theme-contrast.test.mjs）を満たすこと。 */
+
+/* 墨: 暗色のパレット（旧ダーク相当）。
+   2026-11-16 是正: 実機で「黒すぎて見づらい」との指摘を受け、地の明度を上げて
+   柔らかい暗茶に寄せた（paper #262019 → #38322a、文字との対比は 12.8:1 → 9.6:1）。
+   基準（テキスト 4.5:1 以上など）は従来どおり満たす。 */
+:root[data-theme='sumi'] {
+  --ink: #e9dfc9;
+  --muted: #b3a58d;
+  --paper: #38322a;
+  --line: #8f7d62;
+  --vermillion: #f7a48f;
+  --fresh: #6cc9b8;
   --shadow: 0 10px 30px rgb(0 0 0 / 0.45);
-  --tint-base: #2e2822;
-  background: #171310;
+  --tint-base: #403930;
+  background: #2b2620;
   color-scheme: dark;
 }
 
-/* アクセント色（2026-11-15 ユーザー決定）: 既定は朱。設定メニューで用意した色見本から
-   選ぶと <html data-accent> が切り替わり、--vermillion が差し替わる（アプリ内UIのみ）。
-   favicon はブランド色（紙色＋墨）に固定で、アクセント変更の対象外。
-   各色はライト/ダーク両方でコントラスト基準（test/theme-contrast.test.mjs）を満たす値にする。 */
-:root[data-accent='ai'] {
-  --vermillion: #1d4e89;
+/* 灯: 墨より一段明るい暖色系ダーク（2026-11-16 追加、GitHub の Dark Dimmed 相当）。
+   夜に灯りの下で長く読む用途を想定し、地は中暗色、全体のコントラストは墨より
+   やや落としてある（文字対比 9.1:1）。「端末に合わせる」のダーク側は従来どおり墨で、
+   灯は手動選択専用。 */
+:root[data-theme='akari'] {
+  --ink: #f3ead3;
+  --muted: #c9b797;
+  --paper: #453b30;
+  --line: #a68f68;
+  --vermillion: #ffb59d;
+  --fresh: #85d6c4;
+  --shadow: 0 10px 30px rgb(0 0 0 / 0.38);
+  --tint-base: #4a4034;
+  background: #362f27;
+  color-scheme: dark;
 }
-:root[data-theme='dark'][data-accent='ai'] {
-  --vermillion: #7aa7d9;
+
+/* 古紙: 茶色く沈めたセピア系の明るいパレット */
+:root[data-theme='koshi'] {
+  --ink: #1c1106;
+  --muted: #5c4630;
+  --paper: #efddba;
+  --line: #7a5f3a;
+  --vermillion: #9e2a18;
+  --fresh: #1e6b57;
+  --tint-base: #fffaf0;
+  background: #e3cfa2;
+  color-scheme: light;
 }
-:root[data-accent='midori'] {
-  --vermillion: #20603c;
-}
-:root[data-theme='dark'][data-accent='midori'] {
-  --vermillion: #6fbf8f;
-}
-:root[data-accent='murasaki'] {
-  --vermillion: #60367c;
-}
-:root[data-theme='dark'][data-accent='murasaki'] {
-  --vermillion: #b79ce0;
-}
-:root[data-accent='sumi'] {
-  --vermillion: #38322b;
-}
-:root[data-theme='dark'][data-accent='sumi'] {
-  --vermillion: #a89f92;
+
+/* 白黒: 純白＋真っ黒のハイコントラスト。アクセントも墨色に寄せる */
+:root[data-theme='shirokuro'] {
+  --ink: #000000;
+  --muted: #4d4d4d;
+  --paper: #ffffff;
+  --line: #767676;
+  --vermillion: #000000;
+  --fresh: #404040;
+  --tint-base: #ffffff;
+  background: #ececec;
+  color-scheme: light;
 }
