@@ -107,6 +107,19 @@ export function safeUrl(url: string | null | undefined): string {
   }
 }
 
+/** ISO日時を「M/D(曜) HH:mm」形式に整える（一覧・詳細・スポットライトで共用）。 */
+export function formatWhen(iso: string): string {
+  const date = new Date(iso)
+  if (Number.isNaN(date.getTime())) return ''
+  return new Intl.DateTimeFormat('ja-JP', {
+    month: 'numeric',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+    weekday: 'short',
+  }).format(date)
+}
+
 /* ---------- テキスト整形（ルールベース抽出の後処理） ---------- */
 
 const ENTITIES: Record<string, string> = {

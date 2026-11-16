@@ -18,6 +18,7 @@ import {
   fetchEditorials,
   fetchKeywords,
   fetchTabRows,
+  formatWhen,
   postReadEvent,
   refreshFeed,
   removeBookmark,
@@ -26,6 +27,7 @@ import {
   versionsOfEvent,
 } from './api'
 import type { CoverageKind, FeedTab, StoryRow } from './types'
+import Spotlight from './Spotlight'
 import './App.css'
 
 const TABS: { id: FeedTab; label: string; hint: string }[] = [
@@ -80,18 +82,6 @@ const CATEGORY_ORDER = [
   'その他',
 ]
 const ALL_CATEGORY = 'すべて'
-
-function formatWhen(iso: string) {
-  const date = new Date(iso)
-  if (Number.isNaN(date.getTime())) return ''
-  return new Intl.DateTimeFormat('ja-JP', {
-    month: 'numeric',
-    day: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-    weekday: 'short',
-  }).format(date)
-}
 
 type DetailState = 'loading' | 'loaded'
 type EditorialState = 'unchecked' | 'loading' | 'done'
@@ -596,6 +586,12 @@ function App() {
     }
   }
 
+  // スポットライト表示（2026-11-16 ユーザー承認）。ポーリング・全画面とは独立の
+  // 表示モードで、開始はマストヘッドのボタン、停止は表示内のボタンだけ。
+  const [spotlightActive, setSpotlightActive] = useState(false)
+  /** 一覧の再読み込みが完了するたびに増える世代。スポットライトの組み直しの契機 */
+  const [refreshGen, setRefreshGen] = useState(0)
+
   useEffect(() => {
     try {
       localStorage.setItem('ichigyo:polling', polling ? '1' : '0')
@@ -727,6 +723,7 @@ function App() {
       if (cancelled) return
       if (!result?.refreshing || tries >= 15) {
         setBgRefreshing(false)
+        setRefreshGen((g) => g + 1)
         clearInterval(timer)
       }
     }, 3000)
@@ -746,6 +743,7 @@ function App() {
       /* 失敗しても次の周期で再試行する */
     }
     await loadPage(tab, category, 0, false)
+    setRefreshGen((g) => g + 1)
     try {
       const page = await fetchTabRows(
         'important',
@@ -1062,6 +1060,7 @@ function App() {
       setOutletId(null)
       goToListPane()
       await loadPage(tab, category, 0, false)
+      setRefreshGen((g) => g + 1)
       fetchDbStatus()
         .then((s) => setDbBytes(s.dbBytes))
         .catch(() => {})
@@ -1169,6 +1168,15 @@ function App() {
                 <polyline points="1 20 1 14 7 14" />
                 <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" />
               </svg>
+            </button>
+            <button
+              type="button"
+              className="spotlight-start"
+              onClick={() => setSpotlightActive(true)}
+              disabled={spotlightActive}
+              title="重要タブの上位10件を1件ずつ大きく表示します"
+            >
+              {spotlightActive ? 'スポットライト表示中' : 'スポットライト表示'}
             </button>
             <button
               type="button"
@@ -1486,6 +1494,14 @@ function App() {
         </div>
       ) : null}
 
+      {spotlightActive ? (
+        <Spotlight
+          refreshGen={refreshGen}
+          mutedCategories={mutedCategories}
+          onStop={() => setSpotlightActive(false)}
+        />
+      ) : (
+        <>
       <nav className="tabs" aria-label="ニュースの種類">
         {TABS.map((item) => (
           <button
@@ -2002,6 +2018,8 @@ function App() {
           </article>
         ) : null}
       </div>
+        </>
+      )}
     </div>
   )
 }

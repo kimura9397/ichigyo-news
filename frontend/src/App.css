@@ -1253,3 +1253,210 @@
   line-height: 1.8;
   color: var(--ink);
 }
+
+/* --- スポットライト表示（2026-11-16 ユーザー承認） ---
+   重要タブの上位10件を新聞の一面のイメージで1件ずつ大きく出す常駐表示。
+   見出しも含め書体はゴシック（明朝はブランド名のみ、という既存ルールを守る）。
+   停止ボタンはスクロールしても常に見えるよう、見出し帯ごと sticky にする。 */
+
+.spotlight-start {
+  appearance: none;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--ink);
+  padding: 7px 14px;
+  font: inherit;
+  font-size: calc(12px * var(--font-scale));
+  font-weight: 650;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.spotlight-start:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--ink) 8%, transparent);
+}
+
+.spotlight-start:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.spotlight {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  background: var(--paper);
+  padding: 0 clamp(20px, 5vw, 72px) 48px;
+}
+
+.spotlight-head {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: var(--paper);
+  padding-top: 14px;
+}
+
+.spotlight-topbar {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.spotlight-kicker {
+  font-size: calc(12px * var(--font-scale));
+  font-weight: 700;
+  letter-spacing: 0.22em;
+  color: var(--vermillion);
+}
+
+.spotlight-position {
+  font-family: var(--mono);
+  font-size: calc(13px * var(--font-scale));
+  color: var(--muted);
+}
+
+.spotlight-stop {
+  appearance: none;
+  margin-inline-start: auto;
+  border: 0;
+  border-radius: 999px;
+  background: var(--vermillion);
+  color: var(--paper);
+  padding: 9px 18px;
+  font: inherit;
+  font-size: calc(13px * var(--font-scale));
+  font-weight: 700;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.spotlight-progress {
+  height: 4px;
+  margin-top: 12px;
+  background: color-mix(in srgb, var(--line) 55%, var(--tint-base));
+}
+
+.spotlight-progress-bar {
+  height: 100%;
+  background: var(--vermillion);
+  transition: width 0.1s linear;
+}
+
+.spotlight-story {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding-top: 28px;
+}
+
+.spotlight-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 14px;
+  margin: 0 0 14px;
+  font-size: calc(14px * var(--font-scale));
+  color: var(--muted);
+}
+
+.spotlight-category {
+  border: 1px solid var(--ink);
+  border-radius: 4px;
+  padding: 2px 10px;
+  font-weight: 700;
+  color: var(--ink);
+}
+
+.spotlight-title {
+  margin: 0;
+  font-size: calc(var(--fs-detail-title) * 2);
+  font-weight: 800;
+  line-height: 1.35;
+  letter-spacing: 0.01em;
+  color: var(--ink);
+}
+
+.spotlight-lead {
+  margin: 18px 0 0;
+  max-width: 62ch;
+  font-size: calc(16px * var(--font-scale));
+  line-height: 1.85;
+  color: var(--ink);
+}
+
+.spotlight-papers {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 26px 32px;
+  margin-top: 34px;
+  border-top: 3px solid var(--ink);
+  padding-top: 22px;
+}
+
+.spotlight-paper {
+  min-width: 0;
+}
+
+.spotlight-paper-kicker {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 10px;
+  margin: 0 0 6px;
+  font-size: calc(13px * var(--font-scale));
+  font-weight: 700;
+  color: var(--vermillion);
+}
+
+.spotlight-paper-kicker time {
+  font-weight: 400;
+  color: var(--muted);
+  font-size: calc(12px * var(--font-scale));
+}
+
+.spotlight-paper h3 {
+  margin: 0 0 6px;
+  font-size: calc(var(--fs-paper-title) * 1.05);
+  line-height: 1.5;
+  color: var(--ink);
+}
+
+.spotlight-paper-summary {
+  margin: 0;
+  font-size: calc(13.5px * var(--font-scale));
+  line-height: 1.8;
+  color: var(--ink);
+  white-space: pre-line;
+}
+
+.spotlight-paper-link {
+  display: inline-block;
+  margin-top: 8px;
+  font-size: calc(12.5px * var(--font-scale));
+  color: var(--vermillion);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.spotlight-note {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding-top: 40px;
+  font-size: calc(14px * var(--font-scale));
+  color: var(--muted);
+}
+
+@media (max-width: 860px) {
+  .spotlight {
+    padding: 0 18px 36px;
+  }
+
+  .spotlight-title {
+    font-size: calc(var(--fs-detail-title) * 1.35);
+  }
+
+  .spotlight-papers {
+    grid-template-columns: 1fr;
+  }
+}
