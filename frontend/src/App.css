@@ -1254,32 +1254,46 @@
   color: var(--ink);
 }
 
-/* --- スポットライト表示（2026-11-16 ユーザー承認） ---
+/* --- スポットライト表示（2026-11-16 ユーザー承認、同日改修） ---
    重要タブの上位10件を新聞の一面のイメージで1件ずつ大きく出す常駐表示。
+   表示中はマストヘッドを隠し、全画面で流す前提で画面いっぱいに使う。
    見出しも含め書体はゴシック（明朝はブランド名のみ、という既存ルールを守る）。
    停止ボタンはスクロールしても常に見えるよう、見出し帯ごと sticky にする。 */
 
+/* 開始ボタンはマストヘッドのアイコンボタン群（高さ36px・丸）に合わせ、
+   朱の塗り＋再生画面のアイコンで「表示を始める操作」と分かる見た目にする */
 .spotlight-start {
   appearance: none;
-  border: 1px solid var(--line);
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  height: 36px;
+  border: 0;
   border-radius: 999px;
-  background: transparent;
-  color: var(--ink);
-  padding: 7px 14px;
+  background: var(--vermillion);
+  color: var(--paper);
+  padding: 0 16px;
   font: inherit;
-  font-size: calc(12px * var(--font-scale));
-  font-weight: 650;
+  font-size: calc(12.5px * var(--font-scale));
+  font-weight: 700;
   white-space: nowrap;
   cursor: pointer;
+  box-shadow: 0 1px 3px color-mix(in srgb, var(--ink) 28%, transparent);
+  transition: filter 0.15s ease, opacity 0.15s ease;
+}
+
+.spotlight-start svg {
+  flex: none;
 }
 
 .spotlight-start:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--ink) 8%, transparent);
+  filter: brightness(1.08);
 }
 
 .spotlight-start:disabled {
   opacity: 0.55;
   cursor: default;
+  box-shadow: none;
 }
 
 .spotlight {
@@ -1287,7 +1301,7 @@
   min-height: 0;
   overflow: auto;
   background: var(--paper);
-  padding: 0 clamp(20px, 5vw, 72px) 48px;
+  padding: 0 clamp(16px, 3vw, 56px) 56px;
 }
 
 .spotlight-head {
@@ -1311,10 +1325,24 @@
   color: var(--vermillion);
 }
 
-.spotlight-position {
-  font-family: var(--mono);
-  font-size: calc(13px * var(--font-scale));
+/* 流し直し直後だけ出す控えめな通知（「更新しました」） */
+.spotlight-notice {
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--ink) 8%, transparent);
   color: var(--muted);
+  padding: 4px 12px;
+  font-size: calc(12px * var(--font-scale));
+  white-space: nowrap;
+  animation: spotlight-notice-in 0.25s ease;
+}
+
+@keyframes spotlight-notice-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
 }
 
 .spotlight-stop {
@@ -1345,9 +1373,7 @@
 }
 
 .spotlight-story {
-  max-width: 1200px;
-  margin: 0 auto;
-  padding-top: 28px;
+  padding-top: clamp(26px, 4.5vh, 52px);
 }
 
 .spotlight-meta {
@@ -1370,24 +1396,24 @@
 
 .spotlight-title {
   margin: 0;
-  font-size: calc(var(--fs-detail-title) * 2);
+  font-size: calc(var(--fs-detail-title) * 2.75);
   font-weight: 800;
-  line-height: 1.35;
+  line-height: 1.3;
   letter-spacing: 0.01em;
   color: var(--ink);
 }
 
 .spotlight-lead {
   margin: 18px 0 0;
-  max-width: 62ch;
-  font-size: calc(16px * var(--font-scale));
+  max-width: 80ch;
+  font-size: calc(17px * var(--font-scale));
   line-height: 1.85;
   color: var(--ink);
 }
 
 .spotlight-papers {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
   gap: 26px 32px;
   margin-top: 34px;
   border-top: 3px solid var(--ink);
@@ -1440,8 +1466,6 @@
 }
 
 .spotlight-note {
-  max-width: 1200px;
-  margin: 0 auto;
   padding-top: 40px;
   font-size: calc(14px * var(--font-scale));
   color: var(--muted);
@@ -1453,7 +1477,7 @@
   }
 
   .spotlight-title {
-    font-size: calc(var(--fs-detail-title) * 1.35);
+    font-size: calc(var(--fs-detail-title) * 1.5);
   }
 
   .spotlight-papers {

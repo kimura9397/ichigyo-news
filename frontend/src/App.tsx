@@ -44,6 +44,8 @@ function formatBytes(bytes: number) {
 
 const BASE_TITLE = '一行ニュース — 一行で、五紙を読む。'
 const POLL_INTERVALS = [2, 5, 10]
+// スポットライトで1件を表示する時間（秒）の選択肢（2026-11-16 ユーザー指示）
+const SPOTLIGHT_SECONDS_OPTIONS = [10, 20, 30, 60]
 
 // 一覧ペインの幅比率（PCレイアウト、2026-11-15 ユーザー決定でドラッグ調整可能に）
 const PANE_RATIO_DEFAULT = 0.38
@@ -591,6 +593,24 @@ function App() {
   const [spotlightActive, setSpotlightActive] = useState(false)
   /** 一覧の再読み込みが完了するたびに増える世代。スポットライトの組み直しの契機 */
   const [refreshGen, setRefreshGen] = useState(0)
+  // スポットライトで1件を表示する時間（秒、2026-11-16 ユーザー指示）。
+  // 他の設定と同じく localStorage に保存し、実行中の変更は次の見出しから反映される
+  const [spotlightSeconds, setSpotlightSeconds] = useState<number>(() => {
+    try {
+      const v = Number(localStorage.getItem('ichigyo:spotlightSeconds'))
+      return SPOTLIGHT_SECONDS_OPTIONS.includes(v) ? v : 20
+    } catch {
+      return 20
+    }
+  })
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('ichigyo:spotlightSeconds', String(spotlightSeconds))
+    } catch {
+      /* 保存できなくても動作は続ける */
+    }
+  }, [spotlightSeconds])
 
   useEffect(() => {
     try {
@@ -1088,6 +1108,9 @@ function App() {
 
   return (
     <div className="shell">
+      {/* スポットライト中はマストヘッドを隠し、表示が画面全体を占有する
+          （2026-11-16 ユーザー指示） */}
+      {!spotlightActive ? (
       <header className="masthead">
         <div className="brand">
           <h1>一行ニュース</h1>
@@ -1176,7 +1199,28 @@ function App() {
               disabled={spotlightActive}
               title="重要タブの上位10件を1件ずつ大きく表示します"
             >
-              {spotlightActive ? 'スポットライト表示中' : 'スポットライト表示'}
+              <svg
+                width="15"
+                height="15"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                aria-hidden="true"
+              >
+                <rect x="2.5" y="4" width="19" height="12.5" rx="2" />
+                <path
+                  d="M10.2 8.1v4.3l3.8-2.15z"
+                  fill="currentColor"
+                  stroke="none"
+                />
+                <line x1="9" y1="20.5" x2="15" y2="20.5" />
+              </svg>
+              <span>
+                {spotlightActive ? 'スポットライト表示中' : 'スポットライト表示'}
+              </span>
             </button>
             <button
               type="button"
@@ -1284,6 +1328,30 @@ function App() {
                             aria-pressed={density === value}
                           >
                             {label}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                    <div className="menu-row">
+                      <span className="menu-label">
+                        スポットライトの表示時間
+                      </span>
+                      <div
+                        className="segmented"
+                        role="group"
+                        aria-label="スポットライトで1件を表示する時間"
+                      >
+                        {SPOTLIGHT_SECONDS_OPTIONS.map((s) => (
+                          <button
+                            key={s}
+                            type="button"
+                            className={
+                              spotlightSeconds === s ? 'seg is-active' : 'seg'
+                            }
+                            onClick={() => setSpotlightSeconds(s)}
+                            aria-pressed={spotlightSeconds === s}
+                          >
+                            {s}秒
                           </button>
                         ))}
                       </div>
@@ -1434,6 +1502,7 @@ function App() {
           </div>
         </div>
       </header>
+      ) : null}
 
       {confirmingMaintenance ? (
         <div
@@ -1478,7 +1547,7 @@ function App() {
         </div>
       ) : null}
 
-      {polling ? (
+      {polling && !spotlightActive ? (
         <div
           className="poll-progress"
           role="progressbar"
@@ -1498,6 +1567,7 @@ function App() {
         <Spotlight
           refreshGen={refreshGen}
           mutedCategories={mutedCategories}
+          rotateMs={spotlightSeconds * 1000}
           onStop={() => setSpotlightActive(false)}
         />
       ) : (
