@@ -303,6 +303,8 @@ function App() {
   })
   const [menuOpen, setMenuOpen] = useState(false)
   const menuRef = useRef<HTMLDivElement | null>(null)
+  /** 拡大表示（ライトボックス）中の写真の URL。null のときは閉じている */
+  const [zoomedPhoto, setZoomedPhoto] = useState<string | null>(null)
   /** このセッションで詳細を開いたクラスタ（サーバーの read_flag と合わせて薄表示に使う） */
   const [readClusters, setReadClusters] = useState<ReadonlySet<number>>(
     new Set(),
@@ -401,6 +403,26 @@ function App() {
       document.removeEventListener('keydown', onKeyDown)
     }
   }, [menuOpen])
+
+  // 写真の拡大表示（ライトボックス）は Esc で閉じる。開いている間は背面のスクロールを止める
+  useEffect(() => {
+    if (!zoomedPhoto) return
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setZoomedPhoto(null)
+    }
+    document.addEventListener('keydown', onKeyDown)
+    const prevOverflow = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    return () => {
+      document.removeEventListener('keydown', onKeyDown)
+      document.body.style.overflow = prevOverflow
+    }
+  }, [zoomedPhoto])
+
+  // 別のニュースを開いたら拡大表示は閉じる
+  useEffect(() => {
+    setZoomedPhoto(null)
+  }, [selectedId])
 
   // キーワードウォッチ（2026-11-15 ユーザー決定）。キーワードはサーバー側（DB）に保存する
   // （照合条件であると同時に、更新時の収集クエリでもあるため）。
@@ -1953,6 +1975,9 @@ function App() {
                   alt=""
                   loading="lazy"
                   referrerPolicy="no-referrer"
+                  onClick={() => {
+                    if (selected.imageUrl) setZoomedPhoto(selected.imageUrl)
+                  }}
                   onError={(e) => {
                     e.currentTarget.style.display = 'none'
                   }}
@@ -2151,6 +2176,31 @@ function App() {
               </>
             )}
           </article>
+        ) : null}
+
+        {zoomedPhoto ? (
+          <div
+            className="photo-lightbox"
+            role="dialog"
+            aria-modal="true"
+            aria-label="写真の拡大表示"
+            onClick={() => setZoomedPhoto(null)}
+          >
+            <img
+              className="photo-lightbox-img"
+              src={zoomedPhoto}
+              alt=""
+              referrerPolicy="no-referrer"
+            />
+            <button
+              type="button"
+              className="photo-lightbox-close"
+              aria-label="拡大表示を閉じる"
+              onClick={() => setZoomedPhoto(null)}
+            >
+              ×
+            </button>
+          </div>
         ) : null}
       </div>
     </div>
