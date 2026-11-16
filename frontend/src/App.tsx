@@ -679,6 +679,26 @@ function App() {
           ? [searchQuery]
           : []
         : []
+  // スポットライト中に「いまどのビューの一覧を流しているか」を左上に
+  // 小さく出すための表示名（2026-11-16 ユーザー指示）
+  const spotlightSourceLabel =
+    tab === 'important'
+      ? '重要'
+      : tab === 'fresh'
+        ? '新着'
+        : tab === 'editorials'
+          ? '社説'
+          : tab === 'all'
+            ? 'すべて'
+            : tab === 'bookmarks'
+              ? 'ブックマーク'
+              : tab === 'watch'
+                ? watchKeyword
+                  ? `キーワードウォッチ「${watchKeyword}」`
+                  : 'キーワードウォッチ'
+                : searchQuery
+                  ? `検索「${searchQuery}」`
+                  : 'キーワード検索'
   const page = pages[key] ?? null
 
   const loadPage = useCallback(
@@ -1582,6 +1602,7 @@ function App() {
           sourceCategory={category}
           mutedCategories={mutedCategories}
           sourceWatchKeywords={spotlightWatchKeywords}
+          sourceLabel={spotlightSourceLabel}
           rotateMs={spotlightSeconds * 1000}
           onStop={() => setSpotlightActive(false)}
         />

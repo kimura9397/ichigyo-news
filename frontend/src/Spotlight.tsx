@@ -10,6 +10,7 @@
 // 「更新しました」と短く知らせる（表示中の記事を維持する旧挙動から変更）。
 // 表示は必ず1画面に収める（スクロールさせない）。収まらない分は各紙の
 // 抜粋を行数クランプで切り落とす（2026-11-16 ユーザー指示）。
+// 左上には、いまどのビューの一覧を流しているかを小さく出す（同日追加指示）。
 // 停止は表示内の「スポットライトを停止」ボタンだけ（ユーザーの明示指示）:
 // マウス移動・他の場所のクリック・キー操作では止めない。
 import { useEffect, useRef, useState } from 'react'
@@ -32,6 +33,8 @@ interface SpotlightProps {
   mutedCategories: string[]
   /** ウォッチ／検索ビューの照合キーワード（他ビューでは空） */
   sourceWatchKeywords: string[]
+  /** 流しているビューの表示名（左上に小さく出す） */
+  sourceLabel: string
   /** 1件あたりの表示時間（ミリ秒）。設定で変更でき、次の見出しから反映される */
   rotateMs: number
   onStop: () => void
@@ -50,6 +53,7 @@ export default function Spotlight({
   sourceCategory,
   mutedCategories,
   sourceWatchKeywords,
+  sourceLabel,
   rotateMs,
   onStop,
 }: SpotlightProps) {
@@ -228,6 +232,9 @@ export default function Spotlight({
       <div className="spotlight-head">
         <div className="spotlight-topbar">
           <span className="spotlight-kicker">スポットライト</span>
+          {sourceLabel ? (
+            <span className="spotlight-source">{sourceLabel}</span>
+          ) : null}
           {notice ? (
             <span className="spotlight-notice" role="status">
               {notice}
