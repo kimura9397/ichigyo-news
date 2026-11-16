@@ -341,7 +341,9 @@
   padding: 0 0 6px;
   overflow-x: auto;
   overflow-y: hidden;
-  scrollbar-width: thin;
+  /* スクロールバーの細さ・色は index.css の全体指定に任せる（ここで
+     scrollbar-width を書くと Chrome が標準モードに切り替わり、
+     テーマ色の ::-webkit-scrollbar がこの要素だけ効かなくなる） */
 }
 
 .version-rail > li {
@@ -1075,6 +1077,12 @@
 
 .menu-label {
   font-size: 13px;
+  /* ラベル列が潰れて1文字ずつ縦に割れるのを防ぐ（2026-11-16 実機報告: 「テーマ」が
+     テ/ー/マ と改行された）。日本語はどこでも改行できるため、flex の最小幅が
+     1文字分まで縮んでしまう。ラベルは縮ませず、右側のコントロール
+     （テーマの色見本群など、折り返し可能な側）に幅を譲らせる */
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 
 .menu-note {
@@ -1124,6 +1132,13 @@
   border-bottom: 1px solid var(--line);
   overflow-x: auto;
   scrollbar-width: none;
+}
+
+/* チップ列（.cat-bar / .watch-bar）はバーを出さないのが意図。scrollbar-width: none が
+  効かない WebKit 系でも隠れるよう、擬似要素側でも消す（.workspace と同じ流儀） */
+.cat-bar::-webkit-scrollbar,
+.watch-bar::-webkit-scrollbar {
+  display: none;
 }
 
 .kw-form {

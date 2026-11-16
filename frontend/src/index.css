@@ -72,6 +72,46 @@ button:focus-visible {
   outline-offset: 2px;
 }
 
+/* スクロールバー（2026-11-16 ユーザーフィードバック「太いのでモダナイズ」、Issue #1）。
+   既定の太いバーをやめ、アプリ内の全スクロール領域（一覧/詳細ペイン、設定メニュー、
+   版チップ列など）を共通で細くする。色はテーマ変数に追随させ、thumb は --line、
+   hover で --muted に寄せて少しだけ強調する。track は透明。
+   自動で消える仕掛けは入れない（常時見える方がスクロール位置が分かって実用的）。
+   WebKit 系は ::-webkit-scrollbar で 8px・角丸にする。標準プロパティ
+   （scrollbar-width / scrollbar-color）は ::-webkit-scrollbar を解釈しない
+   Firefox 向けに @supports で切り分ける（両方を無条件に書くと Chrome が
+   標準側を優先し、8px 指定と hover の色替えが効かなくなるため）。
+   非表示が意図の領域（.workspace ページャー、.cat-bar、.watch-bar）は
+   個別指定で隠れたままになる（App.css 側）。 */
+@supports not selector(::-webkit-scrollbar) {
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: var(--line) transparent;
+  }
+}
+
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--line);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--muted);
+}
+
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
 /* フォントサイズ設定（小／中／大、2026-11-15 ユーザー決定）。
    <html data-font-size> は index.html の先行スクリプトと React が設定する */
 :root[data-font-size='small'] {
