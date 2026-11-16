@@ -582,6 +582,11 @@
   background: color-mix(in srgb, var(--ink) 13%, transparent);
 }
 
+/* トグル系アイコンボタン（全画面など）の ON 状態 */
+.icon-btn[aria-pressed='true'] {
+  background: color-mix(in srgb, var(--ink) 18%, transparent);
+}
+
 .icon-btn:disabled {
   opacity: 0.45;
   cursor: wait;

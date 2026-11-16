@@ -572,6 +572,30 @@ function App() {
   const nextPollAtRef = useRef(0)
   const wakeLockRef = useRef<{ release: () => void } | null>(null)
 
+  // 全画面表示（横ディスプレイ常駐表示用、2026-11-16 ユーザー承認）。
+  // 状態の正はブラウザ側（document.fullscreenElement）で、fullscreenchange で
+  // 同期する。F11 や Esc で切り替えた場合もボタンの表示がずれないようにするため。
+  const [isFullscreen, setIsFullscreen] = useState(false)
+
+  useEffect(() => {
+    const sync = () => setIsFullscreen(Boolean(document.fullscreenElement))
+    sync()
+    document.addEventListener('fullscreenchange', sync)
+    return () => document.removeEventListener('fullscreenchange', sync)
+  }, [])
+
+  const toggleFullscreen = () => {
+    if (document.fullscreenElement) {
+      void document.exitFullscreen().catch(() => {
+        /* 終了できなくても状態は fullscreenchange 側で同期される */
+      })
+    } else {
+      void document.documentElement.requestFullscreen().catch(() => {
+        /* 許可されなかった場合は何もしない（ボタン表示は実状態のまま） */
+      })
+    }
+  }
+
   useEffect(() => {
     try {
       localStorage.setItem('ichigyo:polling', polling ? '1' : '0')
@@ -1144,6 +1168,32 @@ function App() {
                 <polyline points="23 4 23 10 17 10" />
                 <polyline points="1 20 1 14 7 14" />
                 <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" />
+              </svg>
+            </button>
+            <button
+              type="button"
+              className="icon-btn"
+              onClick={toggleFullscreen}
+              aria-pressed={isFullscreen}
+              title={isFullscreen ? '全画面を終了' : '全画面にする'}
+              aria-label={isFullscreen ? '全画面を終了' : '全画面にする'}
+            >
+              <svg
+                width="17"
+                height="17"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                aria-hidden="true"
+              >
+                {isFullscreen ? (
+                  <path d="M8 3v3a2 2 0 0 1-2 2H3m18 0h-3a2 2 0 0 1-2-2V3m0 18v-3a2 2 0 0 1 2-2h3M3 16h3a2 2 0 0 1 2 2v3" />
+                ) : (
+                  <path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3" />
+                )}
               </svg>
             </button>
             <div className="menu-wrap" ref={menuRef}>
