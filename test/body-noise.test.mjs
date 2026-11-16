@@ -2,10 +2,12 @@
 // - 構造での除外: class/id に share / newsletter / related 等を含む要素を丸ごと落とす。
 // - 行単位のフィルタ: 定型の勧誘・案内・フッター行を落とし、実文（「市場シェア」等）は残す。
 // - 保存済み本文への後がけ（refilterBodies）: 既存DBの body_text にも同じフィルタが効く。
+// - 方式1（2026-11-16）: 段落全体がリンクの段落（関連記事の見出し）は位置を問わず落とす。
+// - 方式2（2026-11-16）: 後がけで、他クラスタ記事のタイトルと一致する行を落とす。
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { openDb } from '../src/db.mjs';
-import { extractBody, filterBodyLines } from '../src/body.mjs';
+import { extractBody, filterBodyLines, buildTitleClusterIndex, isOtherTitleLine } from '../src/body.mjs';
 import { refilterBodies } from '../src/lifecycle.mjs';
 
 const FIXTURE_HTML = `<html><head><title>テスト記事</title></head><body>
@@ -245,6 +247,106 @@ test('後がけ: 保存済み本文にもフィルタが効き、2回目は変�
   assert.equal(refilterBodies(db), 1);
   const a = db.prepare('SELECT body_text FROM articles').get();
   assert.equal(a.body_text, '実際の本文の一文目です。これは残るべき実文です。\n実際の本文の二文目です。これも残るべき実文です。');
+  assert.equal(refilterBodies(db), 0);
+});
+
+const LINK_FIXTURE_HTML = `<html><head><title>リンク段落の検証</title></head><body>
+<div class="article-body">
+  <p>政府は十五日、新しい経済対策を閣議決定した。物価高への対応として、所得減税と給付金を組み合わせた内容で、規模は十兆円を超える見通しだ。</p>
+  <p><a href="https://example.com/articles/other1">ドイツ国防相、次期戦闘機計画で消極的か 開発枠組み巡り溝</a></p>
+  <p>与党内では財源をめぐる議論が続いており、国債発行に頼らない形を目指す声がある一方で、野党は規模ありきの姿勢を批判している。</p>
+  <a href="https://example.com/articles/other2"><p>包まれたリンクカードの見出しがここに入る これはカードです</p></a>
+  <p>根拠となる<a href="https://example.com/ref">資料の全文</a>は公表されており、担当者は「確認してほしい」と説明している。文の一部のリンクは実文として扱う。</p>
+  <p>市場関係者の間では対策の効果を見極めたいとの声が多く、日経平均株価は小幅な値動きにとどまった。市場シェアの拡大を狙う企業の動きも目立つ。</p>
+</div>
+</body></html>`;
+
+test('方式1: 段落全体がリンクの段落は本文中盤でも落ち、部分リンクの実文は残る', () => {
+  const body = extractBody(LINK_FIXTURE_HTML);
+  // 実本文は残る
+  assert.ok(body.includes('経済対策を閣議決定した'), '実本文1が残る');
+  assert.ok(body.includes('財源をめぐる議論が続いており'), '実本文2が残る');
+  assert.ok(body.includes('市場シェアの拡大を狙う'), '実本文3が残る');
+  assert.ok(body.includes('は公表されており、担当者は「確認してほしい」と説明している'), '文の一部がリンクの実文は残る');
+  // リンクだけの段落は落ちる
+  assert.ok(!body.includes('ドイツ国防相、次期戦闘機計画で消極的か'), 'リンクのみ段落（中盤）が落ちる');
+  assert.ok(!body.includes('包まれたリンクカードの見出し'), '<a> で包まれた段落が落ちる');
+});
+
+test('末尾の他記事見出しリスト: 小数点を含む見出し行が末尾にあってもランを落とす', () => {
+  const input = [
+    '日本と米国の両政府は、貿易委員会の初会合を開いた。関税の引き下げに向けた議論が始まった。',
+    '',
+    '歴史的舞台、行方は未知数 米中ロ会談、3首脳の思惑交錯',
+    '',
+    '米FRB、理事人事難航か 民主上院奪還、政策不透明感も',
+    '',
+    '米中、「貿易委員会」初会合 4.8兆円関税下げへ議論',
+  ].join('\n');
+  const out = filterBodyLines(input);
+  assert.equal(out, '日本と米国の両政府は、貿易委員会の初会合を開いた。関税の引き下げに向けた議論が始まった。');
+});
+
+test('方式2: 他クラスタのタイトルと一致する行だけを落とす', () => {
+  const index = buildTitleClusterIndex([
+    { cluster_id: 2, title: '米「パックス・シリカ」に抗議 トランプ氏訪問控え市民らデモ―フィリピン' },
+    { cluster_id: 1, title: '自クラスタの記事タイトルはこちらです' },
+    { cluster_id: 3, title: '短い見出し' },
+    { cluster_id: 4, title: '防衛省AI指針、月末に公表 小泉氏「現場で使えるものに」' },
+  ]);
+  // 他クラスタのタイトルそのままの行は落ちる
+  assert.equal(isOtherTitleLine('米「パックス・シリカ」に抗議 トランプ氏訪問控え市民らデモ―フィリピン', 1, index), true);
+  // タイトル＋配信日時の行も落ちる
+  assert.equal(isOtherTitleLine('防衛省AI指針、月末に公表 小泉氏「現場で使えるものに」 11/15(土) 9:30', 1, index), true);
+  // 自クラスタのタイトルは落とさない
+  assert.equal(isOtherTitleLine('自クラスタの記事タイトルはこちらです', 1, index), false);
+  // 短いタイトル（キー10字未満）は索引に入らず、一致しても落とさない
+  assert.equal(isOtherTitleLine('短い見出し', 1, index), false);
+  // 文で終わる行はタイトルと一致しても落とさない（実文の保護）
+  assert.equal(isOtherTitleLine('米「パックス・シリカ」に抗議 トランプ氏訪問控え市民らデモ―フィリピン。', 1, index), false);
+  // 無関係な行は落とさない
+  assert.equal(isOtherTitleLine('全く関係のない見出しのような行がここにある', 1, index), false);
+});
+
+test('方式2の後がけ: 中盤の他記事タイトル行が落ち、自クラスタタイトル行と実文は残る（冪等）', () => {
+  const db = openDb(':memory:');
+  const now = new Date().toISOString();
+  const mk = (title, category) => {
+    const c = db.prepare('INSERT INTO clusters (title, category, first_seen_at, last_seen_at) VALUES (?, ?, ?, ?)')
+      .run(title, category, now, now);
+    const clusterId = Number(c.lastInsertRowid);
+    const v = db.prepare('INSERT INTO versions (cluster_id, version_no, title, created_at) VALUES (?, 1, ?, ?)')
+      .run(clusterId, title, now);
+    return { clusterId, versionId: Number(v.lastInsertRowid) };
+  };
+  const ins = db.prepare('INSERT INTO articles (cluster_id, version_id, source, title, url, summary, published_at, fetched_at, body_text) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)');
+  // 他記事（タイトル照合の対象）
+  const other = mk('米「パックス・シリカ」に抗議 トランプ氏訪問控え市民らデモ―フィリピン', '国際');
+  ins.run(other.clusterId, other.versionId, '時事', '米「パックス・シリカ」に抗議 トランプ氏訪問控え市民らデモ―フィリピン', 'https://example.com/other', '', now, now, '');
+  // 自記事（本文にノイズが混入している）
+  const ownTitle = '次期戦闘機開発 イタリアがドイツ参画に反対と報道';
+  const own = mk(ownTitle, '国際');
+  const noisy = [
+    '【ロンドン時事】日英伊3カ国による次期戦闘機共同開発計画に関し、イタリアはドイツの参画に反対だと報じられた。伊国防省は報道を否定している。',
+    '',
+    '米「パックス・シリカ」に抗議 トランプ氏訪問控え市民らデモ―フィリピン',
+    '',
+    'FTによると、伊国防相が日英とのオンライン会合でドイツの参画に「強い反対」を表明した。オブザーバー参加を提案したという。',
+    '',
+    'イタリア政府高官も、開発を加速させるには当面ドイツをオブザーバーにとどめるのが望ましいと述べた。',
+    '',
+    ownTitle,
+    '',
+    '資金拠出に見合う役割を求めるドイツ側は、イタリアの提案を「受け入れられない」と反発した。協議は難航する可能性もある。',
+  ].join('\n');
+  ins.run(own.clusterId, own.versionId, '時事', ownTitle, 'https://example.com/own', '', now, now, noisy);
+  assert.equal(refilterBodies(db), 1);
+  const a = db.prepare('SELECT body_text FROM articles WHERE cluster_id = ?').get(own.clusterId);
+  assert.ok(!a.body_text.includes('パックス・シリカ'), '他記事のタイトル行が中盤から落ちる');
+  assert.ok(a.body_text.includes(ownTitle), '自クラスタのタイトル行は中盤では残る（方式2の対象外）');
+  assert.ok(a.body_text.includes('伊国防省は報道を否定している'), '実文1が残る');
+  assert.ok(a.body_text.includes('オブザーバー参加を提案したという'), '実文2が残る');
+  assert.ok(a.body_text.includes('協議は難航する可能性もある'), '実文3が残る');
   assert.equal(refilterBodies(db), 0);
 });
 

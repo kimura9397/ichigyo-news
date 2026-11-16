@@ -17,7 +17,7 @@ import { lookup } from 'node:dns/promises';
 import { isIP } from 'node:net';
 import { stripTags, decodeEntities, isWrapperUrl, isYahooArticleUrl, bigrams, filterWeakBigrams, matchScore } from './collector.mjs';
 import { resolveGoogleNewsUrl } from './gnews-resolve.mjs';
-import { buildArticleSearchText } from './normalize.mjs';
+import { buildArticleSearchText, normalizeForSearch } from './normalize.mjs';
 import { extractKeyPoints } from './extract.mjs';
 
 const TIMEOUT_MS = 15000; // 遅い回線・重いページでも本文ダウンロードが間に合うよう余裕を持たせる
@@ -253,6 +253,22 @@ export function extractAuthor(html, text) {
 // 処理（プロフィール段落の除外、先頭のタイトル重複行の除外、末尾の見出し行ランの除去）
 // を行う。写真キャプションや中見出しのような正当な要素は対象にしない（末尾の見出しランは
 // 「文で終わらない行が3行以上連続し、前に文のある行が残る場合」に限って落とす）。
+//
+// 2026-11-16 の追加（単独で本文中盤に挟まる他記事見出し行への対応、ユーザー承認）:
+// 中盤に単独で挟まる見出し行は、テキストの形だけでは中見出しと区別できないため、
+// 「出自」の信号を2つ使う。
+// 方式1（取得時の構造信号）: 関連記事の見出しは元のHTMLでは段落全体が別記事への
+//   <a> リンクになっている（<p><a>見出し</a></p>、または <a> が <p> を包む形）。
+//   抽出時に「段落のテキスト全体がリンクで構成される」段落を落とす。本物の中見出しは
+//   見出しタグ（h2〜h4）由来でリンクではない（現行の抽出は <p> のみを対象とするため
+//   見出しタグはそもそも本文に入らず、この判定で消えることもない）。文の一部だけが
+//   リンクになっている実文は「行全体がリンク」ではないので落とさない。
+// 方式2（DBの他記事タイトルとの照合）: 挟まる見出しは実在する別記事のタイトル
+//   そのものであることが多い。後がけ（refilterBodies）で、本文の各行を正規化して
+//   DB内の他クラスタ記事のタイトルと照合し、一致した行を落とす。誤爆防止のため、
+//   照合キーが10字以上・行が文（。）で終わらない・完全一致（または末尾の配信日時を
+//   除いた一致）に限る。自クラスタのタイトルと一致する行は落とさない（同一記事の
+//   再掲や自記事タイトルは方式2の対象外。先頭の重複は従来の仕組みが担当する）。
 
 /** class/id のトークン（空白・ハイフン等で分割した断片）がこの語で始まる要素はノイズとみなす。 */
 const NOISE_ATTR_TOKENS = [
@@ -307,6 +323,21 @@ function stripNoiseElements(html) {
   if (!skipTag) out += html.slice(last);
   // 閉じタグが見つからず末尾まで除去してしまった場合は壊れた入力とみなし、原文を返す
   return skipTag ? html : out;
+}
+
+/**
+ * 段落のテキスト全体がリンク（<a>）で構成されているか（方式1の構造信号）。
+ * 関連記事カードの見出し段落はこの形になる。文の一部だけがリンクになっている
+ * 実文は、リンク外のテキストが残るため false になる（落とさない）。
+ */
+function isLinkOnlyParagraph(innerHtml) {
+  const inner = String(innerHtml || '');
+  if (!/<a\b/i.test(inner)) return false;
+  let linkText = '';
+  for (const m of inner.matchAll(/<a\b[^>]*>([\s\S]*?)<\/a>/gi)) linkText += stripTags(m[1]);
+  const squash = (s) => s.replace(/[\s　]+/g, '');
+  const full = squash(stripTags(inner));
+  return full.length > 0 && full === squash(linkText);
 }
 
 /** 行がノイズ（定型の勧誘・案内・フッター）かどうか。実文を消さないよう具体形に絞る。 */
@@ -405,6 +436,19 @@ function dropTitleDupLines(blocks, title) {
   }
 }
 
+/** 文末の句点（「。」または「．」）の位置。小数点（数字に挟まれた点）は除く。無ければ -1。 */
+function lastSentencePeriodIndex(t) {
+  for (let i = t.length - 1; i >= 0; i--) {
+    const ch = t[i];
+    if (ch !== '。' && ch !== '．') continue;
+    const prev = t[i - 1] || '';
+    const next = t[i + 1] || '';
+    if (/[0-9０-９]/.test(prev) && /[0-9０-９]/.test(next)) continue;
+    return i;
+  }
+  return -1;
+}
+
 /**
  * 見出し的な行か（末尾の他記事見出しリストの判定用）。新聞の本文段落はほぼ必ず
  * 「。」で終わる（引用で終わる段落も文なので同様）ため、「文で終わらない短めの行」を
@@ -419,7 +463,10 @@ function isHeadlineLikeLine(line) {
   if (/」$/.test(t) && t.includes('。')) return false; // 引用文で終わる段落も本文
   // 文の連なりの末尾が「…」等で切れた行（最後の「。」の後ろが短い）は本文とみなす。
   // 逆に、団体紹介文のような断片は最後の「。」の後ろに長い続きがある。
-  const lastPeriod = Math.max(t.lastIndexOf('。'), t.lastIndexOf('．'));
+  // 小数点（数字に挟まれた「．」）は文の区切りではないため、文末の句点として数えない
+  // （例: 「４．８兆円関税下げへ議論」という見出し行が本文扱いになり、末尾の
+  // 見出しラン全体が残ってしまう実例が時事の記事であったため、2026-11-16 に是正）。
+  const lastPeriod = lastSentencePeriodIndex(t);
   if (lastPeriod >= 0 && t.length - lastPeriod - 1 < 15) return false;
   return true;
 }
@@ -473,15 +520,70 @@ function trimTailHeadlineRun(blocks) {
   }
 }
 
+/** タイトル照合用のキー: 検索用の正規化（NFKC・表記ゆれ）の上で、空白・句読点・括弧類を落とす。 */
+export function titleMatchKey(s) {
+  return normalizeTitleText(normalizeForSearch(s));
+}
+
+/** 照合キーとして短すぎるタイトルは一般的な語句と衝突しやすいため対象にしない。 */
+const OTHER_TITLE_MIN_KEY = 10;
+/** 行末尾に付く配信日時の表記（タイトル＋日時だけの行を照合可能にするため除いて比べる）。 */
+const TRAILING_DATETIME_RES = [
+  /[\s　]+\d{1,2}\/\d{1,2}\([月火水木金土日]\)[\s　]*\d{1,2}:\d{2}(?::\d{2})?[\s　]*$/,
+  /[\s　]+\d{4}\/\d{1,2}\/\d{1,2}[\s　]+\d{1,2}:\d{2}(?::\d{2})?[\s　]*$/,
+];
+
+/**
+ * 記事タイトル群から「照合キー → そのタイトルを持つクラスタIDの集合」の索引を作る（方式2）。
+ * titleRows は { cluster_id, title } の配列。キーが短すぎるタイトルは索引に入れない。
+ */
+export function buildTitleClusterIndex(titleRows) {
+  const index = new Map();
+  for (const r of titleRows || []) {
+    const key = titleMatchKey(r.title);
+    if (key.length < OTHER_TITLE_MIN_KEY) continue;
+    let set = index.get(key);
+    if (!set) index.set(key, (set = new Set()));
+    set.add(r.cluster_id);
+  }
+  return index;
+}
+
+/**
+ * 行が「他クラスタの記事のタイトル」そのものかどうか（方式2）。
+ * 誤爆防止のため、文（。）で終わる行・長すぎる行は対象にせず、一致は完全一致
+ * （または末尾の配信日時を除いた一致）に限る。自クラスタにしか無いタイトルは
+ * 同一記事の再掲として落とさない。
+ */
+export function isOtherTitleLine(line, ownClusterId, titleIndex) {
+  const t = String(line || '').trim();
+  if (t.length < 8 || t.length > 110) return false;
+  if (/[。．]$/.test(t)) return false;
+  const candidates = [t];
+  for (const re of TRAILING_DATETIME_RES) {
+    const stripped = t.replace(re, '');
+    if (stripped !== t) candidates.push(stripped);
+  }
+  for (const cand of candidates) {
+    const key = titleMatchKey(cand);
+    if (key.length < OTHER_TITLE_MIN_KEY) continue;
+    const clusters = titleIndex.get(key);
+    if (clusters && [...clusters].some((c) => c !== ownClusterId)) return true;
+  }
+  return false;
+}
+
 /**
  * 抽出済み本文テキストからノイズ行を取り除く（保存済み本文への後がけにも使う）。
  * 段落構造（空行区切り）は保持する: 段落ブロック単位で処理し、ブロック内の
  * ノイズ行だけを落とす。連続する重複行も落とす。判定は isNoiseLine に集約する。
  * title を渡すと、先頭にある記事タイトルの重複行も落とす（任意）。
+ * dropLine（任意）: 行を受け取り true を返した行も落とす。後がけで方式2
+ * （他記事タイトルとの照合）の述語を差し込むために使う。
  * ブロック単位では著者プロフィール段落の除外と、末尾の他記事見出しリストの
  * 除去（trimTailHeadlineRun）も行う。
  */
-export function filterBodyLines(text, title = '') {
+export function filterBodyLines(text, title = '', dropLine = null) {
   const blocks = [];
   for (const block of String(text || '').split(/\n{2,}/)) {
     if (isProfileBlock(block)) continue;
@@ -489,6 +591,7 @@ export function filterBodyLines(text, title = '') {
     for (const line of block.split('\n')) {
       const t = line.trim();
       if (!t || isNoiseLine(t)) continue;
+      if (dropLine && dropLine(t)) continue;
       if (lines[lines.length - 1] === t) continue;
       lines.push(t);
     }
@@ -515,11 +618,15 @@ export function extractBody(html, title = '') {
     .replace(/<script[\s\S]*?<\/script>/gi, ' ')
     .replace(/<style[\s\S]*?<\/style>/gi, ' ')
     .replace(/<!--[\s\S]*?-->/g, ' ')
-    .replace(/<(nav|header|footer|aside|form|noscript|select|button)[\s\S]*?<\/\1>/gi, ' ');
+    .replace(/<(nav|header|footer|aside|form|noscript|select|button)[\s\S]*?<\/\1>/gi, ' ')
+    // 方式1: <a> が <p> 全体を包むリンクカードは、段落に印を付けて collect で落とす
+    .replace(/<a\b[^>]*>\s*<p\b/gi, '<p data-ichigyo-link="1"');
   const collect = (source) => {
     const paras = [];
     for (const m of source.matchAll(/<p\b([^>]*)>([\s\S]*?)<\/p>/gi)) {
       if (attrsHaveNoise(m[1])) continue; // <p> 自身がノイズ要素なら拾わない
+      if (/\bdata-ichigyo-link\b/.test(m[1])) continue; // <a> で包まれた段落（リンクカード）
+      if (isLinkOnlyParagraph(m[2])) continue; // 段落全体がリンク（関連記事の見出し等）
       const t = stripTags(m[2]).trim();
       if (t.length < 25) continue; // 短い断片（リンク・キャプション類）は本文とみなさない
       if (paras[paras.length - 1] === t) continue;

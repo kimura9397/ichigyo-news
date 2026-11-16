@@ -7,7 +7,7 @@
 // - 保存済み本文には行単位のノイズ除去フィルタを後がけする（本文ノイズ除去、2026-11-15）。
 // - 本文が保存済みで未抽出の記事には、本文中の署名表記から記者名を後がけ抽出する（記者バイライン、2026-11-15）。
 // - 保存済みの社説（found=1）は現在の関連判定で再評価し、通らないものは found=0 に降格する（社説の誤マッチ対策、2026-11-15）。
-import { filterBodyLines, extractAuthorFromText } from './body.mjs';
+import { filterBodyLines, extractAuthorFromText, buildTitleClusterIndex, isOtherTitleLine } from './body.mjs';
 import { editorialRelated, importanceFor, bigrams, filterWeakBigrams, matchScore, jaccard, strongTerms, summaryWords, refineCategory } from './collector.mjs';
 import { normalizeForSearch, buildArticleSearchText } from './normalize.mjs';
 import { extractKeyPoints } from './extract.mjs';
@@ -120,16 +120,20 @@ export function vacuumIfNeeded(db) {
  * 保存済みの本文（articles.body_text）に、ノイズ除去フィルタを後がけする。
  * フィルタで内容が変わった記事だけを更新する。更新した記事数を返す。
  * タイトルも渡し、先頭のタイトル重複行や末尾の他記事見出しリストも落とす。
+ * あわせて方式2（DBの他記事タイトルとの照合）も適用する: 本文の行が他クラスタ
+ * 記事のタイトルそのものなら、単独で挟まった他記事見出し行として落とす。
+ * タイトル索引は全記事から1回だけ作る（本文の保存件数は多くない前提）。
  */
 export function refilterBodies(db) {
-  const rows = db.prepare("SELECT id, title, body_text FROM articles WHERE body_text != ''").all();
+  const rows = db.prepare("SELECT id, cluster_id, title, body_text FROM articles WHERE body_text != ''").all();
   if (!rows.length) return 0;
+  const titleIndex = buildTitleClusterIndex(db.prepare('SELECT cluster_id, title FROM articles').all());
   const update = db.prepare('UPDATE articles SET body_text = ? WHERE id = ?');
   let changed = 0;
   db.exec('BEGIN IMMEDIATE');
   try {
     for (const r of rows) {
-      const cleaned = filterBodyLines(r.body_text, r.title);
+      const cleaned = filterBodyLines(r.body_text, r.title, (line) => isOtherTitleLine(line, r.cluster_id, titleIndex));
       if (cleaned !== r.body_text) { update.run(cleaned, r.id); changed++; }
     }
     db.exec('COMMIT');
