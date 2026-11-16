@@ -129,7 +129,7 @@ export function cleanText(input: string | null | undefined): string {
   return s.replace(/\s+/g, ' ').trim()
 }
 
-/** 抽出文の先頭部分（1〜2文、最大 max 字程度）を要約として切り出す。 */
+/** RSS 抜粋の先頭部分を、文の切れ目を保ったまま最大 max 字程度に整形する（文の選び直しはしない）。 */
 export function summarize(text: string, max = 140): string {
   const clean = cleanText(text)
   if (clean.length <= max) return clean
@@ -273,7 +273,7 @@ function buildCoverages(
   const coverages = order.map((id) => {
     const g = grouped.get(id)!
     const coverage: OutletCoverage = { ...g.base }
-    // 複数記事がある媒体は、要点にも全文（連結した要約）を使う
+    // 複数記事がある媒体は、RSS 抜粋にも全文（連結した要約）を使う
     if ((counts.get(id) ?? 0) > 1) {
       const joined = g.summaries.filter(Boolean).join('\n\n')
       if (joined) coverage.summary = joined

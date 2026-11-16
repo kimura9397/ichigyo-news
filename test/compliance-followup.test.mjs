@@ -5,9 +5,11 @@
 //   第三者ライセンス一覧の同梱
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync, existsSync } from 'node:fs';
+import { readFileSync, existsSync, mkdtempSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { spawnSync } from 'node:child_process';
 import { readResponseText, MAX_FEED_BYTES } from '../src/collector.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -71,6 +73,39 @@ test('build-sea は Node のバージョン固定とチェックサム照合を�
 test('キーワードウォッチの注記（Google ニュース検索への送信）が設定画面にある', () => {
   const app = read('frontend/src/App.tsx');
   assert.ok(app.includes('Google ニュース検索に送信されます'), '設定画面に送信の注記がありません');
+});
+
+test('2回目チェック: 社説取得も共用ヘルパー経由で、タイムアウトは本文読み取りまで保持される', () => {
+  const collector = read('src/collector.mjs');
+  assert.ok(collector.includes('await fetchRssText(url, fetchImpl)'), '社説取得が共用ヘルパーを経由していません');
+  // タイマーの生成は共用ヘルパーの1か所だけ（社説側の早期解除が再発しないこと）
+  const timers = collector.split('setTimeout(() => ctrl.abort(), FETCH_TIMEOUT_MS)').length - 1;
+  assert.equal(timers, 1, 'タイムアウトのタイマーが複数箇所にあります');
+});
+
+test('2回目チェック: ループバック以外の待ち受けでは ACCESS_TOKEN が必須になる', () => {
+  const server = read('server.mjs');
+  assert.ok(server.includes("'127.0.0.1', '::1', 'localhost'"), 'ループバックとして扱う HOST の一覧がありません');
+  assert.ok(server.includes('process.exit(1)'), 'トークン未設定時に終了する処理がありません');
+  // 実際に起動しても、HOST=0.0.0.0 + トークンなしではエラーで終了すること
+  const r = spawnSync(process.execPath, [join(ROOT, 'server.mjs')], {
+    env: { ...process.env, HOST: '0.0.0.0', ACCESS_TOKEN: '', PORT: '18999', NEWS_DB_PATH: join(mkdtempSync(join(tmpdir(), 'ichigyo-token-guard-')), 'news.db') },
+    timeout: 15000,
+    encoding: 'utf8',
+  });
+  assert.equal(r.status, 1, `終了コードが 1 ではありません: status=${r.status} stderr=${r.stderr}`);
+  assert.ok((r.stderr || '').includes('ACCESS_TOKEN'), 'エラーメッセージに ACCESS_TOKEN への言及がありません');
+});
+
+test('2回目チェック: build-sea はネイティブビルドでも実行中 Node の版数を照合する', () => {
+  const buildSea = read('scripts/build-sea.mjs');
+  assert.ok(buildSea.includes('process.version !== NODE_VERSION'), '実行中 Node の版数照合がありません');
+});
+
+test('2回目チェック: 画面ラベルは「RSS 抜粋」で、「要点」は残っていない', () => {
+  const app = read('frontend/src/App.tsx');
+  assert.ok(app.includes("['summary', 'RSS 抜粋']"), '切替ラベルが「RSS 抜粋」になっていません');
+  assert.ok(!app.includes('要点'), 'App.tsx に「要点」が残っています');
 });
 
 test('第三者ライセンス一覧が同梱され、React と Node.js を含む', () => {

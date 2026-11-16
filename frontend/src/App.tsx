@@ -1043,10 +1043,10 @@ function App() {
 
   const detailLoading = selected ? !selected.detailLoaded : false
   const editorialLoading = selectedEditorialState === 'loading'
-  // 要点は常時、社説は中身がある（または確認中）場合だけ切替を出す
+  // RSS 抜粋は常時、社説は中身がある（または確認中）場合だけ切替を出す
   const visibleKinds = (
     [
-      ['summary', '要点'],
+      ['summary', 'RSS 抜粋'],
       ['editorial', '社説'],
     ] as const
   ).filter(
@@ -1922,7 +1922,7 @@ function App() {
                     ) : (
                       <>
                         <Paragraphs
-                          text={activeOutlet.summary || '（要点はありません）'}
+                          text={activeOutlet.summary || '（RSS 抜粋はありません）'}
                         />
                         {activeOutlet.url ? (
                           <a

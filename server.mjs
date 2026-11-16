@@ -27,9 +27,17 @@ try {
 const PUBLIC_DIR = join(ROOT, 'public');
 const PORT = Number(process.env.PORT || 8787);
 // 既定はループバックのみ（2026-11-16 コンプライアンス対応 #1）。LAN 等の別端末から
-// 開きたい場合だけ HOST=0.0.0.0 のように明示指定する（その場合は ACCESS_TOKEN も前提）。
+// 開きたい場合だけ HOST=0.0.0.0 のように明示指定する。その場合は ACCESS_TOKEN が
+// 必須で、未設定なら起動しない（2回目のチェック 2026-11-16 の指摘で強制化）。
 const HOST = process.env.HOST || '127.0.0.1';
 const ACCESS_TOKEN = process.env.ACCESS_TOKEN || '';
+// ループバックとして扱うのはリテラルな 127.0.0.1 / ::1 / localhost のみ
+// （名前解決はしない。それ以外の HOST はすべて「外向け」として扱う）。
+const LOOPBACK_HOSTS = new Set(['127.0.0.1', '::1', 'localhost']);
+if (!LOOPBACK_HOSTS.has(HOST.replace(/^\[|\]$/g, '').toLowerCase()) && !ACCESS_TOKEN) {
+  console.error(`ichigyo-news: HOST=${HOST} はループバック以外のため、ACCESS_TOKEN の設定が必須です。ACCESS_TOKEN を設定してから起動してください`);
+  process.exit(1);
+}
 const AS_SEA = runningAsSea();
 // DB の置き場所: NEWS_DB_PATH が最優先。SEA ではユーザーデータ領域、それ以外は従来の data/news.db
 const DB_PATH = process.env.NEWS_DB_PATH

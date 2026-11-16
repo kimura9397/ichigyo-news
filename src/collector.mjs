@@ -761,16 +761,27 @@ return { seen: items.length, inserted };
 
 // ---------- フィード取得 ----------
 
-async function fetchFeed(feed, fetchImpl = fetch) {
+/**
+ * RSS テキストを取得する（通常フィードと社説検索の共用）。
+ * タイムアウトは応答本文の読み取りが終わるまで解除しない。ヘッダーだけ返して
+ * 止まる応答でも待ち続けず、FETCH_TIMEOUT_MS で打ち切る。
+ * （社説側は以前 fetch 直後にタイマーを解除しており、2回目のコンプライアンス
+ * チェック 2026-11-16 の指摘でこの形に統一した。）
+ */
+async function fetchRssText(url, fetchImpl = fetch) {
 const ctrl = new AbortController();
 const timer = setTimeout(() => ctrl.abort(), FETCH_TIMEOUT_MS);
 try {
-const res = await fetchImpl(feed.url, { signal: ctrl.signal, headers: { 'user-agent': 'news-app/0.1 (+personal use)'}});
+const res = await fetchImpl(url, { signal: ctrl.signal, headers: { 'user-agent': 'news-app/0.1 (+personal use)' } });
 if (!res.ok) throw new Error(`HTTP ${res.status}`);
-return parseRss(await readResponseText(res), feed);
+return await readResponseText(res);
 } finally {
 clearTimeout(timer);
 }
+}
+
+async function fetchFeed(feed, fetchImpl = fetch) {
+return parseRss(await fetchRssText(feed.url, fetchImpl), feed);
 }
 
 // 保持期間（prune）・閲覧集計・VACUUM は src/lifecycle.mjs に分離した
@@ -856,12 +867,7 @@ for (const query of queries) {
 if (found) break;
 const url = `https://news.google.com/rss/search?q=${encodeURIComponent(query)}&hl=ja&gl=JP&ceid=JP:ja`;
 try {
-const ctrl = new AbortController();
-const timer = setTimeout(() => ctrl.abort(), FETCH_TIMEOUT_MS);
-const res = await fetchImpl(url, { signal: ctrl.signal, headers: { 'user-agent': 'news-app/0.1 (+personal use)' } });
-clearTimeout(timer);
-if (!res.ok) continue;
-const items = parseRss(await readResponseText(res), {});
+const items = parseRss(await fetchRssText(url, fetchImpl), {});
 for (const it of items) {
 if (normalizeSource(it.source) !== paper && !it.title.includes(paper)) continue;
 if (!it.title.includes('社説')) continue;

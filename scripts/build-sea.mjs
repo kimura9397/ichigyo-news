@@ -134,6 +134,12 @@ async function main() {
     if (isWin && process.platform !== 'win32') {
       nodeBinary = await fetchWindowsNode();
     } else if (target === process.platform) {
+      // 自マシンの Node をそのまま土台にする経路では、固定版と版数がずれると
+      // 同梱ライセンスの Node 表記と実際の土台が食い違う。照合して違えば止める
+      // （2回目のコンプライアンスチェック 2026-11-16 の指摘）。
+      if (process.version !== NODE_VERSION) {
+        throw new Error(`ネイティブビルドには Node ${NODE_VERSION} が必要です（現在の実行環境は ${process.version}）。${NODE_VERSION} の Node で実行し直してください`);
+      }
       nodeBinary = process.execPath;
     } else {
       throw new Error(`この環境（${process.platform}）から ${target} 向けは生成できません（win32 のみダウンロード生成に対応）`);

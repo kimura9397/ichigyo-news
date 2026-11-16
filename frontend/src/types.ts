@@ -9,7 +9,7 @@ export interface OutletCoverage {
   outletName: string
   headline: string
   publishedAt: string
-  /** 要点: RSS要約の先頭部分 */
+  /** RSS 抜粋: RSS要約の先頭部分を整形したもの */
   summary: string
   /** 元記事URL（「元記事を読む」リンクになる） */
   url?: string
