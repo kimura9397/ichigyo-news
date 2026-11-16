@@ -303,9 +303,9 @@
 
 .detail-head h2 {
   margin: 0 0 8px;
-  /* 詳細タイトルは大きな見出しとして明朝を維持する（ブランド要素）。
-     明朝を使ってよいのは、この見出しとマストヘッドのタイトルだけ（test/font-stack.test.mjs で固定） */
-  font-family: var(--serif);
+  /* 詳細タイトルもゴシック（2026-11-16 ユーザー決定）。明朝を使ってよいのは
+     マストヘッドのブランド表示（.brand h1）だけ（test/font-stack.test.mjs で固定） */
+  font-family: var(--sans);
   font-size: var(--fs-detail-title);
   line-height: 1.35;
 }
