@@ -127,7 +127,7 @@ node server.mjs
 
 - 取得対象は公開RSSのみです。記事ページへの自動取得はしません。各媒体の利用規約・robots の定めを尊重してください。
 - Googleニュース等のRSSは非公式な公開フィードであり、仕様変更や提供終了があり得ます。
-- 2026年11月に外部のコンプライアンスレビューを受け、本文取得の廃止などを決めた経緯は [docs/compliance-review-2026-11-16.md](docs/compliance-review-2026-11-16.md) に記録しています。
+- 2026年11月にコンプライアンスチェック（開発者自身によるセルフチェック）を行い、本文取得の廃止などを決めた経緯は [docs/compliance-check-2026-11-16.md](docs/compliance-check-2026-11-16.md) に記録しています。
 
 ## 開発
 
@@ -136,7 +136,7 @@ node server.mjs
 - ブランチ運用とコントリビューションのルール: [CONTRIBUTING.md](CONTRIBUTING.md)
 - バージョニングとリリースの手順: [RELEASING.md](RELEASING.md)
 - 要件と決定の記録: [REQUIREMENTS.md](REQUIREMENTS.md)
-- コンプライアンスレビューの経緯（2026-11-16）: [docs/compliance-review-2026-11-16.md](docs/compliance-review-2026-11-16.md)
+- コンプライアンスチェックの経緯（2026-11-16）: [docs/compliance-check-2026-11-16.md](docs/compliance-check-2026-11-16.md)
 
 ## 連絡先
 
