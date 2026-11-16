@@ -12,7 +12,7 @@ import { fileURLToPath } from 'node:url';
 import { openDb } from './src/db.mjs';
 import { refresh, fetchEditorials, checkTopEditorials } from './src/collector.mjs';
 import { fetchClusterBodies, fetchTopImages } from './src/body.mjs';
-import { addBookmark, removeBookmark, isBookmarked, recordRead, foldOldReadEvents, pruneOldClusters, pruneFetchRuns, refilterBodies, backfillAuthors, splitOverMergedClusters, reevaluateEditorials, refreshSearchText, refreshExtracts } from './src/lifecycle.mjs';
+import { addBookmark, removeBookmark, isBookmarked, recordRead, foldOldReadEvents, pruneOldClusters, pruneFetchRuns, refilterBodies, backfillAuthors, splitOverMergedClusters, splitForeignVersions, reevaluateEditorials, refreshSearchText, refreshExtracts } from './src/lifecycle.mjs';
 import { normalizeForSearch } from './src/normalize.mjs';
 import { listKeywords, addKeyword as addKeywordToDb, removeKeyword as removeKeywordFromDb } from './src/keywords.mjs';
 import { runningAsSea, readSeaAsset, defaultDataDir, openBrowser } from './src/sea.mjs';
@@ -398,11 +398,12 @@ const server = createServer(async (req, res) => {
       const refilteredBodies = refilterBodies(db);
       const backfilledAuthors = backfillAuthors(db);
       const splitClusters = splitOverMergedClusters(db);
+      const splitForeign = splitForeignVersions(db);
       const refreshedSearchText = refreshSearchText(db);
       const refreshedExtracts = refreshExtracts(db);
       const reevaluatedEditorials = reevaluateEditorials(db);
       db.exec('VACUUM');
-      return sendJson(res, 200, { pruned_clusters: prunedClusters, folded_reads: foldedReads, refiltered_bodies: refilteredBodies, backfilled_authors: backfilledAuthors, split_clusters: splitClusters, refreshed_search_text: refreshedSearchText, refreshed_extracts: refreshedExtracts, reevaluated_editorials: reevaluatedEditorials, before_bytes: before, after_bytes: dbBytes() });
+      return sendJson(res, 200, { pruned_clusters: prunedClusters, folded_reads: foldedReads, refiltered_bodies: refilteredBodies, backfilled_authors: backfilledAuthors, split_clusters: splitClusters, split_foreign_versions: splitForeign, refreshed_search_text: refreshedSearchText, refreshed_extracts: refreshedExtracts, reevaluated_editorials: reevaluatedEditorials, before_bytes: before, after_bytes: dbBytes() });
     }
     if (p === '/api/status' && req.method === 'GET') {
       const counts = db.prepare('SELECT (SELECT COUNT(*) FROM clusters) AS clusters, (SELECT COUNT(*) FROM versions) AS versions, (SELECT COUNT(*) FROM articles) AS articles').get();

@@ -248,7 +248,9 @@ return inter >= 4 && (containment >= 0.35 || jac >= 0.30) ? containment : 0;
 }
 
 /** 事実要素トークン: 数値＋単位、英字語、事実系キーワード。 */
-const FACT_KEYWORDS = ['死者', '死亡', '逮捕', '起訴', '発表', '確定', '判明', '再開', '中止', '延期', '優勝', '成立', '可決', '否決', '辞任', '就任', '地震', '津波', '避難', '解除', '発令', '上昇', '下落', '最高', '最低', '初'];
+// '発表' と '初' は除いてある: どちらの語も無関係な見出しに頻出し、「新しい事実」の
+// 証拠としては弱すぎる（例: 別会社の情報漏えい記事が「発表」を含むだけで新事実扱いになる）。
+const FACT_KEYWORDS = ['死者', '死亡', '逮捕', '起訴', '確定', '判明', '再開', '中止', '延期', '優勝', '成立', '可決', '否決', '辞任', '就任', '地震', '津波', '避難', '解除', '発令', '上昇', '下落', '最高', '最低'];
 export function factTokens(title) {
 const tokens = new Set();
 for (const m of String(title).matchAll(/[0-9０-９]+(?:\.[0-9０-９]+)?\s*(?:人|円|%|％|件|歳|日|月|年|km|キロ|メートル|m|度|ドル|ポイント)?/g)) {
@@ -259,16 +261,184 @@ for (const kw of FACT_KEYWORDS) if (title.includes(kw)) tokens.add(kw);
 return tokens;
 }
 
+/** アンカー判定から外す汎用ユニット（どの話題にも出てくる語・数量の型・単位語・バズワード）。 */
+const ANCHOR_GENERIC_UNITS = new Set(['可能性', '情報', 'ガバナンス']);
+const ANCHOR_GENERIC_UNIT_RE = /^最大|^(メートル|キロ|センチ|ミリ|グラム|リットル)$/;
+/**
+ * ジャンル定型ユニット: 事件・事故・政治・芸能報道の「型」としてどの話にも出てくる語。
+ * タイトル共有の集計では話題の同一性の根拠にしない（例: 別のひき逃げ事件同士が
+ * 「死亡」「容疑」「逮捕」の共有だけで同一視されるのを防ぐ）。
+ */
+const ANCHOR_GENRE_UNITS = new Set(['死亡', '容疑', '逮捕', '殺人', '被害', '事故', '事件', '発生', '確認', '発見', '捜査', '起訴', '発表', '開催', '実施', '検討', '方針', '対応', '問題', '議論', '影響', '懸念', '期待', '重要', '課題', '安全', '確保', '強化', '支援', '制度', '改革', '関係', '当局', '現場', '説明', '批判', '主張', '政府', '首相', '社会', '経済', '政治', '全国', '年度', '大臣', '知事', '市長', '社長', '喜び', '報告', '祝福']);
+
+function isAnchorGenreUnit(text) {
+return ANCHOR_GENRE_UNITS.has(text) || /人(死亡|けが|負傷|搬送|重傷|軽傷)$/.test(text);
+}
+
+function anchorUnits(title) {
+return topicUnits(title).filter((u) => !ANCHOR_GENERIC_UNITS.has(u.text) && !ANCHOR_GENERIC_UNIT_RE.test(u.text));
+}
+
+function anchorSharesAny(a, b) {
+for (const w of a) if (b.has(w)) return true;
+return false;
+}
+
+function anchorSharedCount(a, b) {
+let n = 0;
+for (const x of a) if (b.has(x)) n++;
+return n;
+}
+
+/**
+* 「同じ話の続報である」ことのアンカー判定（2026-11-16、バージョン誤判定対策）。
+* 新規性だけでは版を作らないための裏付けで、社説の関連判定（editorialRelated）と
+* 同じ考え方（ユニット単位で数え、裏付け＝複数の見出しに現れることを要求する）を
+* バージョン判定向けに調整したもの。次のいずれかを満たせばアンカーありとする:
+* - P0: バイグラムの包含が成立し、候補側の包含率も 0.3 以上ある（短い定型見出しへの
+*   包含だけで通さない）。ベース側がごく短い見出し（バイグラム8以下）の場合は
+*   候補側包含率を免除する（長い続報見出しでは構造的に低くなるため）
+* - P0s: ごく短いベース見出し向け。共有バイグラム3以上＋ベース側包含率0.5以上
+*   （matchScore の「共有4以上」フロアに届かない短さへの対応。例: 「大の里６連勝」）
+* - P6: クラスタタイトルと完全一致するユニット（ジャンル定型・汎用を除く）が2つ以上ある
+* - P7: 完全一致ユニットが1つあり、かつクラスタタイトルとバイグラムを4以上共有し
+*   包含率が0.25以上ある（例: 「ヒ素含む古書」への「ヒ素を含む古書、全国で100点以上確認」）
+* - P1: クラスタタイトルと強い語で一致するユニットに裏付け（後述）があり、どちらか一方が
+*   もう一方の部分文字列（短い側が4字以上）になっている（例: 「空中回収」⊂「宇宙船空中回収」。
+*   最長共通部分文字列での判定は「流通経済大学」vs「流通経済大柏」のような接頭辞だけが
+*   同じ別エンティティや「ファイナル」のような汎用語でも通ってしまうため採用しない）
+* - P5: 6字以上の複合語ユニットが、クラスタタイトル＋v1 の2つ以上のユニットに
+*   またがって窓を3つ以上共有する（例: 「議員定数削減」が「衆院議員定数」と「削減法案」に跨る）
+* - P2: 強い語で一致する裏付けありユニットが2つ以上あり、うち1つ以上がクラスタタイトルとも一致
+* - P3: クラスタタイトルと一致する裏付けありユニット（ジャンル定型を除く）が2つ以上あり、
+*   語彙全体と一致するユニットが3つ以上ある
+* - P4: P3 の語彙条件が2つでも、その2つが同一タイトルユニットの異なる部分を
+*   合計5字以上カバーし、うち1つが強い語で一致すれば通す
+* 裏付け（support）は記事タイトル側で数える。同一見出しを複数媒体が報じている場合は
+* それぞれ独立した裏付けとして数える（記事タイトルの多重集合で数えるのはそのため）。
+* versionTitles は版タイトル（[0] が v1）、articleTitles はクラスタ所属記事のタイトル。
+*/
+export function hasStoryAnchor(newTitle, clusterTitle, versionTitles = [], articleTitles = []) {
+const candUnits = anchorUnits(newTitle);
+const baseAll = [...new Set([clusterTitle, ...versionTitles, ...articleTitles].filter(Boolean))];
+if (!candUnits.length || !baseAll.length) return false;
+const nb = filterWeakBigrams(bigrams(newTitle));
+for (const t of baseAll) {
+const tb = filterWeakBigrams(bigrams(t));
+if (tb.size > 0 && tb.size <= 8) {
+let inter = 0;
+for (const x of nb) if (tb.has(x)) inter++;
+if (inter >= 3 && inter / tb.size >= 0.5) return true; // P0s
+}
+if (matchScore(nb, tb) > 0) {
+let inter = 0;
+for (const x of nb) if (tb.has(x)) inter++;
+if (nb.size && (inter / nb.size >= 0.3 || tb.size <= 8)) return true; // P0
+}
+}
+const titleUnits = anchorUnits(clusterTitle);
+{ // P6 / P7: クラスタタイトルとの完全一致ユニット
+const titleTexts = new Set(titleUnits.map((v) => v.text));
+let exact = 0;
+for (const u of candUnits) if (!isAnchorGenreUnit(u.text) && titleTexts.has(u.text)) exact++;
+if (exact >= 2) return true; // P6
+if (exact >= 1) {
+const tb = filterWeakBigrams(bigrams(clusterTitle));
+let inter = 0;
+for (const x of nb) if (tb.has(x)) inter++;
+if (tb.size && inter >= 4 && inter / tb.size >= 0.25) return true; // P7
+}
+}
+const coreUnits = [...titleUnits, ...anchorUnits(versionTitles[0] || '')];
+const supportTitles = [...articleTitles];
+if (clusterTitle && !articleTitles.includes(clusterTitle)) supportTitles.push(clusterTitle);
+const supportUnitsList = supportTitles.map((t) => anchorUnits(t));
+const baseUnitsList = baseAll.map((t) => anchorUnits(t));
+let strongBacked = 0;
+let strongTitleShared = 0;
+let topicTitleShared = 0;
+let topicVocabShared = 0;
+const backedUnits = [];
+for (const u of candUnits) {
+const strongTitle = titleUnits.some((v) => anchorSharesAny(u.strong, v.strong));
+const anyTitle = strongTitle || titleUnits.some((v) => {
+const s = anchorSharedCount(u.weak, v.weak);
+return s >= 2 || (u.weak.size > 0 && s === u.weak.size)
+|| (v.text.length >= 2 && u.text.includes(v.text)) || (u.text.length >= 2 && v.text.includes(u.text));
+});
+let support = 0;
+let strongBase = false;
+let anyBase = false;
+for (const bus of supportUnitsList) {
+const s = bus.some((v) => anchorSharesAny(u.strong, v.strong));
+const a = s || bus.some((v) => anchorSharesAny(u.weak, v.weak));
+if (a) { support++; if (s) strongBase = true; }
+}
+for (const bus of baseUnitsList) {
+const s = bus.some((v) => anchorSharesAny(u.strong, v.strong));
+const a = s || bus.some((v) => anchorSharesAny(u.weak, v.weak));
+if (a) anyBase = true;
+}
+// 裏付けは原則2件以上。ただし裏付けプール自体が2件以下しかない若いクラスタでは
+// 2件を要求すると構造的に永遠に裏付けが成立しないため、プールが小さい場合は1件で足りる
+const backed = support >= 2 || (supportTitles.length <= 2 && support >= 1);
+if (backed) {
+backedUnits.push(u);
+if (strongTitle && titleUnits.some((v) => anchorSharesAny(u.strong, v.strong)
+&& ((u.text.length >= 4 && v.text.length > u.text.length && v.text.includes(u.text))
+|| (v.text.length >= 4 && u.text.length > v.text.length && u.text.includes(v.text))))) return true; // P1
+if (u.text.length >= 6) { // P5
+const hitUnits = new Set();
+let windows = 0;
+let strongWindows = 0;
+for (const v of coreUnits) {
+const ws = anchorSharedCount(u.strong, v.strong);
+const w = ws + anchorSharedCount(u.weak, v.weak);
+if (w > 0) { hitUnits.add(v.text); windows += w; strongWindows += ws; }
+}
+if (hitUnits.size >= 2 && windows >= 3 && strongWindows >= 1) return true;
+}
+}
+if (strongBase && backed) strongBacked++;
+if (strongTitle) strongTitleShared++;
+if (anyTitle && backed && !isAnchorGenreUnit(u.text)) topicTitleShared++;
+if (anyTitle || anyBase) topicVocabShared++;
+}
+if (strongBacked >= 2 && strongTitleShared >= 1) return true; // P2
+if (topicTitleShared >= 2 && topicVocabShared >= 3) return true; // P3
+if (topicTitleShared >= 2 && topicVocabShared >= 2) { // P4
+for (const v of titleUnits) {
+const union = new Array(v.text.length).fill(false);
+let unitCount = 0;
+let anyStrong = false;
+for (const u of backedUnits) {
+const cov = matchedCoverage(u, v);
+if (!cov.some(Boolean)) continue;
+unitCount++;
+if (anchorSharesAny(u.strong, v.strong)) anyStrong = true;
+cov.forEach((c, i) => { if (c) union[i] = true; });
+}
+if (unitCount >= 2 && anyStrong && union.filter(Boolean).length >= 5) return true;
+}
+}
+return false;
+}
+
 /**
 * バージョン判定（ヒューリスティクス）。
 * 既存バージョン群のタイトルと比べ、
-* - 同一クラスタとみなせる類似度があること
+* - アンカー（同じ話の続報であることの裏付け、hasStoryAnchor）があること
 * - 新規バイグラム比率が高い AND（新規の事実トークンがある OR 新規比率が非常に高い）
 * を満たす場合のみ「新事実を含む続報」として新バージョンにする。
+* 旧判定は新規性しか見ていなかったため、クラスタに紛れ込んだ別ニュースの記事が
+* 「版タイトル群とほぼ重ならない＝新規性が高い」という理由でほぼ必ず新バージョンに
+* なっていた（2026-11-16 ユーザー報告の誤判定）。anchor を渡さない呼び出しでは
+* 従来どおり新規性だけで判定する（後方互換）。
 */
-export function isNewFactFollowUp(existingTitles, newTitle) {
+export function isNewFactFollowUp(existingTitles, newTitle, anchor = null) {
 const nb = bigrams(newTitle);
 if (!nb.size) return false;
+if (anchor && !hasStoryAnchor(newTitle, anchor.clusterTitle || '', existingTitles, anchor.articleTitles || [])) return false;
 const allExisting = new Set();
 for (const t of existingTitles) for (const b of bigrams(t)) allExisting.add(b);
 const newFacts = new Set([...factTokens(newTitle)].filter((t) => ![...existingTitles].some((et) => factTokens(et).has(t))));
@@ -475,6 +645,7 @@ const existsUrl = db.prepare('SELECT id FROM articles WHERE url = ?');
 const clusterCache = new Map(); // id -> { titleBg, articleBgs, summaryWords, lastSeenMs, firstSeenMs, allStrong, allProper }
 for (const c of db.prepare('SELECT id, title, last_seen_at, first_seen_at FROM clusters').all()) {
   clusterCache.set(c.id, {
+    title: c.title,
     titleBg: filterWeakBigrams(bigrams(c.title)), articleBgs: [], summaryWords: new Set(),
     lastSeenMs: Date.parse(c.last_seen_at) || 0, firstSeenMs: Date.parse(c.first_seen_at) || 0,
     allStrong: strongTerms(c.title), allProper: properTerms(c.title),
@@ -488,7 +659,7 @@ for (const a of db.prepare('SELECT cluster_id, title, summary FROM articles').al
   for (const w of strongTerms(a.title)) entry.allStrong.add(w);
   for (const w of properTerms(a.title)) entry.allProper.add(w);
 }
-const versionTitlesStmt = db.prepare('SELECT title FROM versions WHERE cluster_id = ? ORDER BY version_no');
+const articleTitlesStmt = db.prepare('SELECT title FROM articles WHERE cluster_id = ?');
 for (const raw of items) {
 if (!raw.url || !raw.title) continue;
 if (isGarbageItem(raw, now)) continue;
@@ -538,13 +709,25 @@ for (const [cid, entry] of clusterCache) {
 let clusterId, versionId;
 if (best && best.sim >= CLUSTER_THRESHOLD) {
 clusterId = best.id;
-const vTitles = versionTitlesStmt.all(clusterId).map((r) => r.title);
-const latest = db.prepare('SELECT id, version_no FROM versions WHERE cluster_id = ? ORDER BY version_no DESC LIMIT 1').get(clusterId);
-if (isNewFactFollowUp(vTitles, title)) {
+const vRows = db.prepare('SELECT id, version_no, title FROM versions WHERE cluster_id = ? ORDER BY version_no').all(clusterId);
+const vTitles = vRows.map((r) => r.title);
+const latest = vRows[vRows.length - 1];
+const clusterTitle = clusterCache.get(clusterId)?.title || '';
+const articleTitles = articleTitlesStmt.all(clusterId).map((r) => r.title);
+if (isNewFactFollowUp(vTitles, title, { clusterTitle, articleTitles })) {
 const info = db.prepare('INSERT INTO versions (cluster_id, version_no, title, created_at) VALUES (?, ?, ?, ?)').run(clusterId, latest.version_no + 1, title, nowIso);
 versionId = Number(info.lastInsertRowid);
 } else {
-versionId = latest.id;
+// 新版を作らない記事は、タイトルが最も似た既存バージョンに入れる。従来は無条件に
+// 最新版へ入れていたため、誤って作られた最新版に正当な記事が積み上がり、その版が
+// 実在の続報のように見える状態を招いていた。全て類似0なら従来どおり最新版に入れる。
+let target = latest;
+let bestScore = 0;
+for (const v of vRows) {
+const s = matchScore(titleBg, filterWeakBigrams(bigrams(v.title)));
+if (s > bestScore) { bestScore = s; target = v; }
+}
+versionId = target.id;
 }
 db.prepare('UPDATE clusters SET last_seen_at = ? WHERE id = ?').run(nowIso, clusterId);
 } else {
@@ -552,7 +735,7 @@ const info = db.prepare('INSERT INTO clusters (title, title_norm, category, firs
 clusterId = Number(info.lastInsertRowid);
 const v = db.prepare('INSERT INTO versions (cluster_id, version_no, title, created_at) VALUES (?, 1, ?, ?)').run(clusterId, title, nowIso);
 versionId = Number(v.lastInsertRowid);
-clusterCache.set(clusterId, { titleBg, articleBgs: [], summaryWords: new Set(), lastSeenMs: now.getTime(), firstSeenMs: Date.parse(raw.publishedAt || nowIso) || now.getTime(), allStrong: new Set(itemStrong), allProper: new Set(itemProper) });
+clusterCache.set(clusterId, { title, titleBg, articleBgs: [], summaryWords: new Set(), lastSeenMs: now.getTime(), firstSeenMs: Date.parse(raw.publishedAt || nowIso) || now.getTime(), allStrong: new Set(itemStrong), allProper: new Set(itemProper) });
 }
 // 同一記事が「ラッパーURL」と「直接URL」の両方で届いた場合は直接URL側を残す
 // （ラッパーURLでは本文取得ができないため）。同一媒体・同一版・見出しがほぼ同一のものを同一記事とみなす。

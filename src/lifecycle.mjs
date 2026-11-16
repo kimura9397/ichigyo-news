@@ -8,7 +8,7 @@
 // - 本文が保存済みで未抽出の記事には、本文中の署名表記から記者名を後がけ抽出する（記者バイライン、2026-11-15）。
 // - 保存済みの社説（found=1）は現在の関連判定で再評価し、通らないものは found=0 に降格する（社説の誤マッチ対策、2026-11-15）。
 import { filterBodyLines, extractAuthorFromText, buildTitleClusterIndex, isOtherTitleLine } from './body.mjs';
-import { editorialRelated, importanceFor, bigrams, filterWeakBigrams, matchScore, jaccard, strongTerms, summaryWords, refineCategory } from './collector.mjs';
+import { editorialRelated, importanceFor, bigrams, filterWeakBigrams, matchScore, jaccard, strongTerms, summaryWords, refineCategory, hasStoryAnchor } from './collector.mjs';
 import { normalizeForSearch, buildArticleSearchText } from './normalize.mjs';
 import { extractKeyPoints } from './extract.mjs';
 
@@ -237,6 +237,106 @@ export function splitOverMergedClusters(db) {
   return split;
 }
 
+/* ---------- 別ニュースの版の分離 ---------- */
+
+/**
+ * 既存ストーリーの「別バージョン（続報）」として誤って登録された別ニュースの版を、
+ * 独立クラスタへ切り出す保守処理（2026-11-16、バージョン誤判定対策）。
+ * splitOverMergedClusters はバイグラムの実質一致ゼロを条件とするため、タイトル同士が
+ * 弱く似ている別ニュース（別の会社の情報漏えい、別のひき逃げ事件、定型の速報など）は
+ * 拾えない。こちらは取り込み側と同じアンカー判定（hasStoryAnchor）で版ごとに
+ * 「同じ話か」を判定し直す。
+ * 進め方: 版を若い順に見て、正当と判断した版だけをアンカーのベースに加える。
+ * 誤った版をベースに含めると誤り同士が裏付け合って残る（連鎖）ため、切り出した版や
+ * 混在型の版のタイトルはベースに加えない。
+ * 版の受け入れはタイトルアンカーだけで決める。要約の語彙共有は版レベルでは使わない
+ * （和集合は汎用語で簡単に閾値を超えるため。経緯は関数内のコメント参照）。
+ * 受け入れない版は、所属記事の半分以上がベースにアンカーを持つ「混在型」でない限り
+ * 丸ごと別クラスタへ切り出す。記事単位の判定では要約の語彙共有（4以上）も安全弁に
+ * 使うが、記事が1件だけの版では混在があり得ないためタイトルアンカーだけで決める。
+ * 混在型（版タイトルは別ニュースだが記事の大半は元の話）は版単位では安全に切り分け
+ * られないため残し、正当な記事だけをベースに加える。
+ * 切り出した版の数を返す。
+ */
+export function splitForeignVersions(db) {
+  const clusters = db.prepare('SELECT id, title, category FROM clusters').all();
+  if (!clusters.length) return 0;
+  const versionsStmt = db.prepare('SELECT id, version_no, title FROM versions WHERE cluster_id = ? ORDER BY version_no');
+  const artsStmt = db.prepare('SELECT id, title, summary, published_at, fetched_at FROM articles WHERE version_id = ?');
+  const insCluster = db.prepare('INSERT INTO clusters (title, title_norm, category, first_seen_at, last_seen_at, importance_score) VALUES (?, ?, ?, ?, ?, 0)');
+  const moveVersion = db.prepare('UPDATE versions SET cluster_id = ?, version_no = 1 WHERE id = ?');
+  const moveArticles = db.prepare('UPDATE articles SET cluster_id = ? WHERE version_id = ?');
+  const updateScore = db.prepare('UPDATE clusters SET importance_score = ? WHERE id = ?');
+  let split = 0;
+  const affected = new Set();
+  db.exec('BEGIN IMMEDIATE');
+  try {
+    for (const c of clusters) {
+      const versions = versionsStmt.all(c.id);
+      if (versions.length < 2) continue;
+      const baseVersionTitles = [];
+      const baseArticleTitles = [];
+      const baseSummaryWords = new Set();
+      const addSummaryWords = (arts) => { for (const a of arts) for (const w of summaryWords(a.summary)) baseSummaryWords.add(w); };
+      const articleAnchored = (a, titleOnly = false) => {
+        if (hasStoryAnchor(a.title, c.title, baseVersionTitles, baseArticleTitles)) return true;
+        if (titleOnly) return false;
+        let n = 0;
+        for (const w of summaryWords(a.summary)) if (baseSummaryWords.has(w)) n++;
+        return n >= 4;
+      };
+      let isFirst = true;
+      for (const v of versions) {
+        const arts = artsStmt.all(v.id);
+        if (isFirst) {
+          baseVersionTitles.push(v.title);
+          for (const a of arts) baseArticleTitles.push(a.title);
+          addSummaryWords(arts);
+          isFirst = false;
+          continue;
+        }
+        // 版の受理はタイトルアンカーだけで決める。要約の語彙共有は版レベルでは使わない:
+        // 版内全記事の要約の和集合は、ベース側の語彙が大きいほど汎用語で簡単に閾値を
+        // 超えてしまう（実例: 原爆民衆法廷の版が政治資金クラスタの要約語彙と13語を共有
+        // していた）。要約バルブは記事単位の混在判定でのみ使う。
+        const anchored = hasStoryAnchor(v.title, c.title, baseVersionTitles, baseArticleTitles);
+        if (anchored) {
+          baseVersionTitles.push(v.title);
+          for (const a of arts) baseArticleTitles.push(a.title);
+          addSummaryWords(arts);
+          continue;
+        }
+        if (!arts.length) continue;
+        // 記事が1件だけの版では「混在」はあり得ない。要約バルブ（通信社配信の長い要約は
+        // 汎用語をベースと4語以上共有しがち）で残すと別ニュースがほぼ必ず残ってしまうため、
+        // 単一記事版はタイトルアンカーだけで決める（実データでは要約バルブのみで残って
+        // いた単一記事版14件が全て別ニュースだった）。
+        const titleOnly = arts.length === 1;
+        const anchoredArts = arts.filter((a) => articleAnchored(a, titleOnly));
+        if (anchoredArts.length * 2 >= arts.length) {
+          // 混在型: 残し、正当な記事だけをベースに加える（版タイトルは加えない）
+          for (const a of anchoredArts) baseArticleTitles.push(a.title);
+          addSummaryWords(anchoredArts);
+          continue;
+        }
+        const stamps = arts.map((a) => a.published_at || a.fetched_at).filter(Boolean).sort();
+        const fetched = arts.map((a) => a.fetched_at || a.published_at).filter(Boolean).sort();
+        const nowIso = new Date().toISOString();
+        const info = insCluster.run(v.title, normalizeForSearch(v.title), refineCategory(v.title, c.category || ''), stamps[0] || nowIso, fetched[fetched.length - 1] || nowIso);
+        const newId = Number(info.lastInsertRowid);
+        moveVersion.run(newId, v.id);
+        moveArticles.run(newId, v.id);
+        affected.add(c.id);
+        affected.add(newId);
+        split++;
+      }
+    }
+    for (const id of affected) updateScore.run(importanceFor(db, id), id);
+    db.exec('COMMIT');
+  } catch (e) { try { db.exec('ROLLBACK'); } catch {} throw e; }
+  return split;
+}
+
 /* ---------- 保存済み社説の再評価 ---------- */
 
 /**
@@ -277,7 +377,7 @@ export function reevaluateEditorials(db) {
 
 /**
  * refresh 時に行うライフサイクル一式: 閲覧集計 → prune → fetch_runs 整理 → 本文の後がけ → 署名の後がけ → 過剰統合の分離 → 社説の再評価 → 自動 VACUUM 判定。
- * 戻り値: { prunedClusters, foldedReads, refilteredBodies, backfilledAuthors, splitClusters, reevaluatedEditorials, vacuumed }
+ * 戻り値: { prunedClusters, foldedReads, refilteredBodies, backfilledAuthors, splitClusters, splitForeignVersions, reevaluatedEditorials, vacuumed }
  */
 /**
  * キーワード検索/ウォッチの照合用シャドウテキスト（articles.search_text / clusters.title_norm）を
@@ -351,10 +451,11 @@ export function runLifecycle(db, now = new Date()) {
   const refilteredBodies = refilterBodies(db);
   const backfilledAuthors = backfillAuthors(db);
   const splitClusters = splitOverMergedClusters(db);
+  const splitForeign = splitForeignVersions(db);
   const refreshedSearchText = refreshSearchText(db);
   const refreshedExtracts = refreshExtracts(db);
   const reevaluatedEditorials = reevaluateEditorials(db);
   const recomputedImportance = recomputeAllImportance(db, now);
   const vacuumed = vacuumIfNeeded(db);
-  return { prunedClusters, foldedReads, refilteredBodies, backfilledAuthors, splitClusters, refreshedSearchText, refreshedExtracts, reevaluatedEditorials, recomputedImportance, vacuumed };
+  return { prunedClusters, foldedReads, refilteredBodies, backfilledAuthors, splitClusters, splitForeignVersions: splitForeign, refreshedSearchText, refreshedExtracts, reevaluatedEditorials, recomputedImportance, vacuumed };
 }
