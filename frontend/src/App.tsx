@@ -1958,7 +1958,43 @@ function App() {
                 ← 一覧へ戻る
               </button>
               <p className="event-title">{selected.eventTitle}</p>
-              <h2>{selected.title}</h2>
+              <h2>
+                {selected.title}
+                <button
+                  type="button"
+                  className={
+                    selected.bookmarked
+                      ? 'bookmark-toggle is-active'
+                      : 'bookmark-toggle'
+                  }
+                  onClick={toggleBookmark}
+                  aria-pressed={!!selected.bookmarked}
+                  aria-label={
+                    selected.bookmarked
+                      ? 'ブックマーク済み（解除する）'
+                      : 'ブックマークする'
+                  }
+                  title={
+                    selected.bookmarked
+                      ? 'ブックマーク済み（データを整理しても削除されません）'
+                      : 'ブックマークする'
+                  }
+                >
+                  <svg
+                    width="15"
+                    height="15"
+                    viewBox="0 0 24 24"
+                    fill={selected.bookmarked ? 'currentColor' : 'none'}
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    aria-hidden="true"
+                  >
+                    <path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z" />
+                  </svg>
+                </button>
+              </h2>
               <p className="version-meta">
                 v{selected.version}
                 {selected.version === 1 ? ' · 初報' : ' · 続報'}
@@ -1983,22 +2019,6 @@ function App() {
                   }}
                 />
               ) : null}
-              <div className="detail-actions">
-                <button
-                  type="button"
-                  className={
-                    selected.bookmarked
-                      ? 'bookmark-btn is-active'
-                      : 'bookmark-btn'
-                  }
-                  onClick={toggleBookmark}
-                  aria-pressed={!!selected.bookmarked}
-                >
-                  {selected.bookmarked
-                    ? 'ブックマーク済み（削除されません）'
-                    : 'ブックマーク'}
-                </button>
-              </div>
               <ol
                 className="version-rail"
                 aria-label="この出来事の版"

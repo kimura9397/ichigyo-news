@@ -295,7 +295,7 @@
 
 .detail-pane {
   overflow: auto;
-  padding: 24px 28px 40px;
+  padding: 18px 28px 40px;
 }
 
 /* 狭幅ページャーでだけ出す「一覧へ戻る」（広い画面では非表示） */
@@ -316,14 +316,14 @@
 }
 
 .event-title {
-  margin: 0 0 6px;
+  margin: 0 0 4px;
   font-size: 12px;
   letter-spacing: 0.16em;
   color: var(--vermillion);
 }
 
 .detail-head h2 {
-  margin: 0 0 8px;
+  margin: 0 0 6px;
   /* 詳細タイトルもゴシック（2026-11-16 ユーザー決定）。明朝を使ってよいのは
      マストヘッドのブランド表示（.brand h1）だけ（test/font-stack.test.mjs で固定） */
   font-family: var(--sans);
@@ -339,7 +339,7 @@
   max-height: 280px;
   object-fit: cover;
   border-radius: 6px;
-  margin-top: 12px;
+  margin-top: 10px;
   background: color-mix(in srgb, var(--line) 45%, var(--tint-base));
   cursor: zoom-in;
 }
@@ -382,23 +382,27 @@
   cursor: pointer;
 }
 
-.detail-actions {
-  margin-top: 12px;
-}
-
-.bookmark-btn {
+/* ブックマークのトグルは見出しの末尾に置くアイコンボタン（独立した行は
+   占めない）。状態はアイコンの塗り（未済みは輪郭のみ、済みは塗り＋反転地）
+   で判別する。タブ行のブックマークボタンと同じグリフを使う */
+.bookmark-toggle {
   appearance: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  margin-left: 10px;
+  padding: 0;
+  vertical-align: -5px;
   border: 1px solid var(--line);
+  border-radius: 999px;
   background: var(--paper);
   color: var(--ink);
   cursor: pointer;
-  font: inherit;
-  padding: 6px 12px;
-  border-radius: 999px;
-  font-size: 12px;
 }
 
-.bookmark-btn.is-active {
+.bookmark-toggle.is-active {
   border-color: var(--ink);
   background: var(--ink);
   color: var(--paper);
@@ -409,8 +413,8 @@
   flex-wrap: nowrap;
   gap: 8px;
   list-style: none;
-  margin: 16px 0 0;
-  padding: 0 0 6px;
+  margin: 12px 0 0;
+  padding: 0 0 4px;
   overflow-x: auto;
   overflow-y: hidden;
   /* スクロールバーの細さ・色は index.css の全体指定に任せる（ここで
@@ -434,14 +438,14 @@
 }
 
 .version-chip {
-  padding: 6px 10px;
+  padding: 5px 9px;
   border-radius: 999px;
   font-size: 12px;
   white-space: nowrap;
 }
 
 .version-meta {
-  margin: 8px 0 0;
+  margin: 6px 0 0;
   font-size: 12px;
   color: var(--muted);
 }
@@ -459,7 +463,13 @@
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
-  margin-top: 22px;
+}
+
+/* 各紙ボタンは折り返してよい（横スクロール1行にはしない）。詰めるのは
+   チップ自体の余白と、チップ間・折り返し時の行間 */
+.outlet-bar {
+  gap: 5px 6px;
+  margin-top: 12px;
 }
 
 .outlet,
@@ -469,13 +479,17 @@
   font-size: calc(13px * var(--font-scale));
 }
 
+.outlet {
+  padding: 7px 10px;
+}
+
 .kind-bar {
-  margin-top: 10px;
+  margin-top: 8px;
 }
 
 .paper {
-  margin-top: 22px;
-  padding: 22px 24px 28px;
+  margin-top: 16px;
+  padding: 18px 24px 28px;
   background: var(--paper);
   border: 1px solid var(--line);
   box-shadow: var(--shadow);
