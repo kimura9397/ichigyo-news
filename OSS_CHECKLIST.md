@@ -24,11 +24,11 @@
 - CONTRIBUTING.md: ブランチ運用（GitHub Flow、main へ直接コミットしない、テスト通過後にマージ）は現行どおりで公開に耐える。2026-11-16 に Issue ドリブンの運用ルール（6節の項目2）を追記した。
 - LICENSE: MIT で配置済み。
 - REQUIREMENTS.md / ISSUES.md: 開発の決定記録と監査ログとして価値はあるが、開発環境に触れた記述（VM 上の実DB、など）が混ざる内部文書でもある。→ **そのまま公開する**（2026-11-16 ユーザー決定。要約版への差し替えはしない）。
-- スクリーンショット: 未撮影。VM 内の Chromium は管理ビルドで直接起動できず、この環境では実画面を撮れなかった。README には差し込み位置のコメントを残し、ISSUES.md に申し送りを書いた。ユーザー実機で PC の一覧／詳細とスマホ幅の3枚を撮って `docs/images/` に置くのが残件。
+- スクリーンショット: → **実施済み**（2026-11-16）。ユーザー実機で撮影した4枚（PC の一覧＋詳細、設定画面、スマホ幅の一覧と詳細）を `docs/images/` に置き、README に表示した。
 
 ## 3. 非エンジニア向け配布（SEA で実施済み、2026-11-16）
 
-→ 本命案の Node SEA で単一 exe を実装した（`npm run build:sea`、scripts/build-sea.mjs）。サーバー一式を esbuild でバンドルし、`public/` を assets に埋め込み、DB は exe 実行時にユーザーデータ領域へ分離、起動後に既定ブラウザを開く。実測サイズは Windows 版 約90MB / Linux 版 約121MB。Linux 版は起動・画面表示・実収集・DB 作成まで実地検証済み。Windows 版は生成と blob 埋め込みまで確認済みで、起動検証は Windows 実機待ち。ユーザーの決定（2026-11-16）で「exe を配れて寄付導線ができた状態」が公開の必須条件になった。以下の検討メモは実施前の記録として残す。
+→ 本命案の Node SEA で単一 exe を実装した（`npm run build:sea`、scripts/build-sea.mjs）。サーバー一式を esbuild でバンドルし、`public/` を assets に埋め込み、DB は exe 実行時にユーザーデータ領域へ分離、起動後に既定ブラウザを開く。実測サイズは Windows 版 約90MB / Linux 版 約121MB。Linux 版は起動・画面表示・実収集・DB 作成まで実地検証済み。Windows 版はユーザー実機での起動確認まで完了した（2026-11-16）。同日、現行 main から exe を再ビルドし（最新のフロント資産が埋め込まれていることを blob 内のアセット名と CSS で確認）、v0.1.0 の GitHub Release を用意した。ただし Release への exe 添付はこの環境の API 経路では完了していない（6節の3）。ユーザーの決定（2026-11-16）で「exe を配れて寄付導線ができた状態」が公開の必須条件になった。以下の検討メモは実施前の記録として残す。
 
 現状の起動は `node server.mjs` で、Node.js の導入自体が非エンジニアには壁になる。
 「ダブルクリックで起動し、ブラウザが自動で開く」配布物の候補:
@@ -49,7 +49,7 @@
 
 ユーザーの既定方針どおり、CI は公開の段階で入れる（非公開・高速イテレーションの現段階では見送り済み）。
 
-→ 2026-11-16 に下記の素案どおり `.github/workflows/test.yml` を作成した。ただし **リモートへの反映ができていない**。`.github/workflows/` 配下のファイルは、fine-grained PAT に Workflows 権限が無いと Git Data API 経由で push できず、403（Resource not accessible by personal access token）で失敗した。ファイルはローカルブランチ `chore/ci-parked` に退避してある。反映するには次のいずれかが必要: (a) PAT（muse-ichigyo-news）に Repository permissions の Workflows: Read and write を追加する、(b) ユーザーが手元の clone から同ファイルを commit して通常の git push をする。どちらかが済めば、ブランチを main にマージして push するだけで有効になる。
+→ 2026-11-16 に下記の素案どおり `.github/workflows/test.yml` を作成し、**リモートへ反映済み**。当初は fine-grained PAT に Workflows 権限が無く Git Data API 経由の push が 403（Resource not accessible by personal access token）で失敗し、ファイルはローカルブランチ `chore/ci-parked` に退避していた。その後ユーザーが PAT に Workflows と Issues の Read and write を追加したため、ブランチのマージと push が通り、CI が有効になった。
 
 最小構成の素案（＝作成済みの内容）:
 
@@ -83,7 +83,7 @@ jobs:
 
 1. ブランチ保護: main への直接 push 禁止等を GitHub 側で実効化するには Administration 権限が要る。現在の PAT（Contents の読み書きのみ）では設定できない。→ **未実施**。GitHub の画面でユーザーが自分で設定する（公開切替と同じタイミングがよい）。
 2. Issue / PR テンプレート: → **実施済み**（2026-11-16）。`.github/ISSUE_TEMPLATE/` にバグ報告と機能要望の2種を置き、自由形式の Issue は無効化した。`config.yml` の contact_links で、使い方の相談は X（@ichigyo_news）へ誘導する。`PULL_REQUEST_TEMPLATE.md` は「対応 Issue」欄を必須として冒頭に置き、CONTRIBUTING.md に「PR は Issue ドリブン」の運用ルールを明記した（ユーザー決定 2026-11-15）。
-3. 初版リリースタグ v0.1.0: → **実施済み**（2026-11-16）。タグ付け・バージョニングの方針は RELEASING.md に明文化した（SemVer、タグは main の先端、リリースノートは7節の文体で短く）。v0.1.0 は remote main の先端 `906a3fb` に注釈付きタグで打ち、GitHub Release も作成済み（https://github.com/kimura9397/ichigyo-news/releases/tag/v0.1.0）。タグの裁量はユーザーから委ねられた（2026-11-15）。
+3. 初版リリースタグ v0.1.0: → **実施済み**（2026-11-16）。タグ付け・バージョニングの方針は RELEASING.md に明文化した（SemVer、タグは main の先端、リリースノートは7節の文体で短く）。当初 `906a3fb` に打ったタグと Release はアプリの現行コードとずれたため同日に削除し、remote main の先端 `ffe621d` に注釈付きタグで打ち直して GitHub Release を作り直した（https://github.com/kimura9397/ichigyo-news/releases/tag/v0.1.0 、ノートには exe の入手方法・SmartScreen の案内・制限を記載）。タグの裁量はユーザーから委ねられた（2026-11-15）。残るのは Release への exe 添付で、この環境の API 経路ではアップロード先の uploads.github.com がコネクタの登録ホスト（api.github.com のみ）の対象外のため 401（Bad credentials）になり、完了していない。添付するには、ユーザーが GitHub の画面から exe をアップロードするか、コネクタの登録ホストに uploads.github.com を追加する必要がある。exe 本体は現行 main から再ビルド済みで、`dist/sea/ichigyo-news-win32-x64.exe`（94,491,648 バイト）にある。
 4. 英語 README の要否: → **作らない**（ユーザー決定 2026-11-15）。日本語のみで公開する。
 5. REQUIREMENTS.md / ISSUES.md の公開範囲: → **そのまま公開する**（ユーザー決定 2026-11-16）。要約版への差し替えはしない。
 6. X アカウントの開設と運用ルール（8節）: → 開設とプロフィール設定は実施済み。返信対応の範囲などの運用ルールの詳細は未定（公開後に様子を見て決める）。
@@ -126,11 +126,9 @@ README の下書き（冒頭部分のみ、この監査ラウンドの範囲）:
 
 2026-11-16 時点の状況。公開を止める問題は無い。
 
-実施済み: 秘密情報の再スキャン（混入なし）、README の全面書き直し、Issue/PR テンプレートと Issue ドリブン運用の明記、バージョニング方針の明文化（RELEASING.md）、v0.1.0 タグと GitHub Release の作成、X アカウントの開設・プロフィール設定・相互リンク（アプリ内／README／Issue 画面／X のウェブサイト欄）。判断項目は全て決着した（英語 README は作らない、REQUIREMENTS.md / ISSUES.md はそのまま公開、タグは裁量で作成し方針を明文化、PR は Issue ドリブン）。
+実施済み: 秘密情報の再スキャン（混入なし）、README の全面書き直しとスクリーンショット4枚の掲載、Issue/PR テンプレートと Issue ドリブン運用の明記、バージョニング方針の明文化（RELEASING.md）、CI（`.github/workflows/test.yml`）のリモート反映、v0.1.0 タグの打ち直しと GitHub Release の作成、X アカウントの開設・プロフィール設定・相互リンク（アプリ内／README／Issue 画面／X のウェブサイト欄）。判断項目は全て決着した（英語 README は作らない、REQUIREMENTS.md / ISSUES.md はそのまま公開、タグは裁量で作成し方針を明文化、PR は Issue ドリブン）。
 
 残件:
 - リポジトリの公開切替、ブランチ保護、About 欄の設定 — ユーザーが GitHub の画面で行う。
-- CI（`.github/workflows/test.yml`）のリモート反映 — PAT への Workflows 権限追加、またはユーザー自身の push が必要（4節）。
-- README のスクリーンショット3枚 — ユーザー実機で撮影して `docs/images/` に置く（2節）。
-- 非エンジニア向け配布物（SEA）— 実施済み（3節）。Windows 実機での起動確認と、Release への exe 添付（次回リリース時）が残る。
-- 寄付導線（Ko-fi）— 設置済み。Ko-fi ページ（https://ko-fi.com/ichigyo_news ）を開設し、`.github/FUNDING.yml`（`ko_fi: ichigyo_news`）と README の連絡先へのリンクを置いた。公開の必須条件だった寄付導線はこれで充足。受け取り側の Stripe 連携の完了確認はユーザー側に残る。
+- Release への exe 添付 — この環境の API 経路では uploads.github.com がコネクタの登録ホスト対象外で 401 になるため、ユーザーが GitHub の画面からアップロードするか、コネクタの登録ホスト追加が必要（6節の3）。
+- 寄付導線（Ko-fi）— 設置済み。Ko-fi ページ（https://ko-fi.com/ichigyo_news ）を開設し、`.github/FUNDING.yml`（`ko_fi: ichigyo_news`）と README の連絡先へのリンクを置いた。公開の必須条件だった寄付導線はこれで充足。受け取り側の Stripe 連携も Connected であることを確認済み。

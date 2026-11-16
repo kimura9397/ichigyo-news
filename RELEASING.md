@@ -38,3 +38,5 @@ Windows 向けの単一 exe は Node.js の SEA（Single Executable Applications
 ## この環境でのタグ／Release 作成について
 
 Muse の作業環境からは SSH が使えないため、タグと Release は GitHub API で作ります。タグは Git Data API で `main` の先端（リモート側の SHA）に対して作ります（ローカルの SHA とは一致しないため、リモートの先端を取得してから打つのが手順です）。push の仕組み自体は [CONTRIBUTING.md](CONTRIBUTING.md) を参照してください。
+
+なお、Release への exe 添付（アセットのアップロード）は uploads.github.com 宛ての通信で、この環境のコネクタ登録ホスト（api.github.com のみ）の対象外のため、API 経由では 401（Bad credentials）になります（2026-11-16 の v0.1.0 で確認）。当面の添付は GitHub の画面から exe をアップロードする形になります。コネクタの登録ホストに uploads.github.com を追加できれば API 経由でも添付できます。
