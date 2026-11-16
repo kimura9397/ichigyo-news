@@ -1,6 +1,9 @@
-// 社説の誤マッチ対策（2026-11-15）の回帰テスト。
+// 社説の誤マッチ対策（2026-11-15、2026-11-16）の回帰テスト。
 // - 誤マッチ再現: ソウルで開催された車いすマラソンのニュースに、ソウルへの原爆投下に
 //   関する社説が紐づいた実例。旧判定（見出し和集合と特徴語2つ以上共有）では採用されていた。
+// - 誤マッチ再現2: 皇室の大阪訪問のニュースに、クラスタ内の1記事だけが脇で触れた
+//   「サイバー攻撃」の社説が3紙とも紐づいた実例（2026-11-16、公開直後にユーザーが発見）。
+//   3字窓の数え方では複合語1つが「強い語2つ＋弱い語1つ」に化けた。
 // - 正例: 具体的な政策名を共有するペアと、2字の話題語（日銀・利上げ）しか共有語が
 //   無いペアが、厳格化後も「関連あり」を維持すること。
 // - フォールバック廃止: topicTerms が取れないクラスタでは社説検索自体を行わないこと。
@@ -47,6 +50,48 @@ test('無関係な社説: 共通の地名しかない別話題は関連なし', 
   const title = '韓国大統領が来日、首脳会談へ';
   const heads = [title, '韓国大統領、羽田に到着　歓迎式典も'];
   assert.equal(editorialRelated('社説：韓国の原爆被害者への支援を急げ', title, heads), false);
+});
+
+/* ---------- 誤マッチ再現2: 皇室の大阪訪問 × サイバー攻撃の社説（2026-11-16 実例） ---------- */
+
+// クラスタ内の毎日新聞の記事だけが「サイバー攻撃で予定変更も」と脇で触れており、
+// その見出しがクラスタタイトルになっている場合に、サイバー攻撃そのものの社説が
+// 3紙とも紐づいた。複合語1つ「サイバー攻撃」が、3字窓では「サイバ」「イバー」の
+// 強い語2つ＋弱い語「攻撃」に化け、旧判定の両条件を通してしまった。
+const IMPERIAL_HEADS = [
+  '両陛下が「海づくり大会」で大阪入り サイバー攻撃で予定変更も',
+  '天皇皇后両陛下 大阪で海づくり大会関係者と懇談',
+  '天皇皇后両陛下 「全国豊かな海づくり大会」出席へ 大阪に到着',
+  '両陛下、「全国豊かな海づくり大会」臨席のため大阪府をご訪問 漁業関係者とご懇談も',
+  '天皇皇后両陛下 大阪で海づくり大会の式典に',
+  '両陛下、海づくり大会出席',
+  '両陛下、キジハタとヒラメ稚魚を放流 全国豊かな海づくり大会に出席',
+];
+const CYBER_EDITORIALS = [
+  '（社説）サイバー攻撃 官民で総力挙げ対策を',
+  '［社説］急増するサイバー攻撃に重層的な対策を',
+  '＜主張＞サイバー攻撃拠点 「見つける能力」強化急げ 社説',
+];
+
+test('誤マッチ再現2: 皇室の大阪訪問にサイバー攻撃の社説は関連なし（タイトルが混入見出しでも）', () => {
+  // クラスタタイトルが混入見出しそのものの場合（最悪ケース）
+  for (const ed of CYBER_EDITORIALS) {
+    assert.equal(editorialRelated(ed, IMPERIAL_HEADS[0], IMPERIAL_HEADS), false, ed);
+  }
+  // クラスタタイトルが通常の代表見出しの場合
+  for (const ed of CYBER_EDITORIALS) {
+    assert.equal(editorialRelated(ed, IMPERIAL_HEADS[1], IMPERIAL_HEADS), false, ed);
+  }
+});
+
+test('正例: サイバー攻撃そのものが主題のクラスタにはサイバー攻撃の社説が関連ありを維持', () => {
+  const title = '政府機関にサイバー攻撃 被害確認急ぐ';
+  const heads = [
+    title,
+    'サイバー攻撃で行政システムに障害 復旧急ぐ',
+    'サイバー攻撃の被害拡大 政府が対策本部を設置',
+  ];
+  assert.equal(editorialRelated('（社説）サイバー攻撃 官民で総力挙げ対策を', title, heads), true);
 });
 
 /* ---------- fetchEditorials のフィクスチャ ---------- */
@@ -126,6 +171,17 @@ test('再評価の実例回帰: 過剰統合した車いすマラソンクラス
   insertEditorial(db, id, '読売', '社説：日本語学校 外国人教育の充実が急務だ');
   const demoted = reevaluateEditorials(db);
   assert.equal(demoted, 5, '5紙分すべて降格される');
+  assert.equal(db.prepare('SELECT COUNT(*) c FROM editorials WHERE cluster_id = ? AND found = 1').get(id).c, 0);
+});
+
+test('再評価の実例回帰2: 皇室の大阪訪問クラスタに付いたサイバー攻撃の社説は全て降格される', () => {
+  const db = openDb(':memory:');
+  const id = makeCluster(db, IMPERIAL_HEADS[0], IMPERIAL_HEADS);
+  insertEditorial(db, id, '朝日', CYBER_EDITORIALS[0]);
+  insertEditorial(db, id, '日経', CYBER_EDITORIALS[1]);
+  insertEditorial(db, id, '産経', CYBER_EDITORIALS[2]);
+  const demoted = reevaluateEditorials(db);
+  assert.equal(demoted, 3, '3紙分すべて降格される');
   assert.equal(db.prepare('SELECT COUNT(*) c FROM editorials WHERE cluster_id = ? AND found = 1').get(id).c, 0);
 });
 

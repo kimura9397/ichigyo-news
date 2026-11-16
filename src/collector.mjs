@@ -856,33 +856,159 @@ return terms;
 }
 
 /**
-* 社説候補とクラスタの関連判定（2026-11-15 厳格化）。
-* 旧判定（記事見出し最大80件の和集合と「特徴語を2つ以上共有」）は、2字窓の偶然の一致と
-* 大きな和集合の組み合わせで無関係な社説を通してしまった（実例: 車いすマラソンの
-* ニュースに、「ソウル」を共有するだけの原爆投下に関する社説が紐づいた）。
-* 新判定ではクラスタ側の語彙をクラスタタイトル＋代表的な記事見出し（先頭10件）に絞り、
+* 関連判定に使う「語（ユニット）」: カタカナ・漢字・英字の連続。
+* ひらがな・数字・記号が区切りになる（例: 「サイバー攻撃」は1ユニット、
+* 「日銀の利上げ」は「日銀」「利上」の2ユニット）。
+* 対象は3字以上の並びと漢字2字の複合語に限る。各ユニットは内部の表記ごとの
+* ランから strongTerms / weakTerms で窓集合を持つ。
+*/
+export function topicUnits(text) {
+const units = [];
+for (const m of String(text || '').matchAll(/[ァ-ヶーA-Za-z\u4e00-\u9fff]+/g)) {
+const s = m[0];
+const kanjiOnly = /^[\u4e00-\u9fff]+$/.test(s);
+if (s.length < 3 && !(kanjiOnly && s.length === 2)) continue;
+const strong = strongTerms(s);
+const weak = weakTerms(s);
+if (strong.size || weak.size) units.push({ text: s, strong, weak });
+}
+return units;
+}
+
+function sharesAny(a, b) {
+for (const w of a) if (b.has(w)) return true;
+return false;
+}
+
+/** 2文字列の最長共通部分文字列の長さ（ユニット同士の重なりを見るためのもの）。 */
+function longestCommonSubstringLen(a, b) {
+let best = 0;
+const dp = new Array(b.length + 1).fill(0);
+for (let i = 1; i <= a.length; i++) {
+let prev = 0;
+for (let j = 1; j <= b.length; j++) {
+const tmp = dp[j];
+dp[j] = a[i - 1] === b[j - 1] ? prev + 1 : 0;
+if (dp[j] > best) best = dp[j];
+prev = tmp;
+}
+}
+return best;
+}
+
+/**
+* 候補ユニット u の窓と一致した、タイトルユニット v の文字位置を返す。
+* v 内部の表記ごとのランについて、強い窓（3字・英字はラン全体）と
+* 弱い窓（漢字2字）の一致箇所をマークする。
+*/
+function matchedCoverage(u, v) {
+const covered = new Array(v.text.length).fill(false);
+const mark = (start, len) => { for (let i = start; i < start + len && i < covered.length; i++) covered[i] = true; };
+for (const m of v.text.matchAll(/[ァ-ヶー]+|[A-Za-z]+|[\u4e00-\u9fff]+/g)) {
+const run = m[0];
+const base = m.index;
+if (/^[A-Za-z]/.test(run)) {
+if (run.length >= 3 && u.strong.has(run)) mark(base, run.length);
+continue;
+}
+for (let i = 0; i + 3 <= run.length; i++) {
+if (u.strong.has(run.slice(i, i + 3))) mark(base + i, 3);
+}
+if (/^[\u4e00-\u9fff]/.test(run)) {
+for (let i = 0; i + 2 <= run.length; i++) {
+if (u.weak.has(run.slice(i, i + 2))) mark(base + i, 2);
+}
+}
+}
+return covered;
+}
+
+/**
+* 社説候補とクラスタの関連判定（2026-11-16 改訂）。
+* 2026-11-15 の厳格化後も残った誤判定: 判定が3字のスライディングウィンドウを
+* 「語」として数えていたため、複合語1つだけで採用条件を満たすことがあった
+* （実例: 皇室の大阪訪問のニュースに、クラスタ内の1記事だけが脇で触れた
+* 「サイバー攻撃」の社説が3紙とも紐づいた。「サイバー」の2窓が「強い語2つ」、
+* 弱い語「攻撃」と合わせて両条件を通った。クラスタタイトルがその1記事の
+* 見出しだと、タイトル側のアンカーも同じ1語で満たされてしまう）。
+* 新判定では一致を「語（ユニット）」単位で数え、さらにクラスタ側の裏付けとして
+* 頻度（その語がタイトルを含む複数の見出しに現れること）を要求する。
 * 次のいずれかを満たす場合のみ「関連あり」とする:
-* - 強い語をクラスタ語彙と2つ以上共有し、かつクラスタタイトルとも強い語を1つ以上共有する
-* - クラスタタイトルと語（強い・弱いの合算）を2つ以上共有し、かつクラスタ語彙全体と3つ以上共有する
-*   （「日銀」「利上げ」のような2字の話題語しか共有語が無い正例を落とさないため）
+* - 候補のユニットがクラスタタイトルと強い語で一致し、見出し3件以上に現れ、
+*   なおかつタイトル側のユニットと5字以上の共通部分を持つか、候補ユニット自体が
+*   より長いタイトル側のユニットの部分文字列で4字以上ある（政策名のような
+*   固有名詞の共有。「政治資金」⊂「政治資金改革」、「消費減税」⊂「消費減税法案」など。
+*   人名そのもの（「高市首相」⊂「高市首相」）は同一文字列なので対象外）
+* - 強い語で一致するユニットが裏付けありで2つ以上あり、うち1つ以上が
+*   クラスタタイトルとも強い語で一致する
+* - クラスタタイトルと一致するユニットが裏付けありで2つ以上あり、語彙全体と
+*   一致するユニットが3つ以上ある（「日銀」「利上げ」のような2字の話題語のみの正例）。
+*   語彙全体との一致が2つでも、その2つが同一のタイトルユニットの異なる部分を
+*   合計5字以上カバーし、うち1つが強い語で一致すれば通す
+*   （「食品消費税」＋「減税」で「消費税減税法案」を覆う形。地名＋一般語のように
+*   別々のタイトルユニットに散る一致は通さない）
+* 裏付け（support）: そのユニットが現れた見出しの件数。クラスタタイトルは
+* 見出しリストに含まれない場合に限り1件として数える。
 */
 export function editorialRelated(candidateTitle, clusterTitle, headlines = []) {
-const candStrong = strongTerms(candidateTitle);
-const candAll = new Set([...candStrong, ...weakTerms(candidateTitle)]);
-if (!candAll.size) return false;
-const titleStrong = strongTerms(clusterTitle);
-const titleAll = new Set([...titleStrong, ...weakTerms(clusterTitle)]);
-const vocabStrong = new Set(titleStrong);
-const vocabAll = new Set(titleAll);
-for (const h of headlines) {
-for (const w of strongTerms(h)) { vocabStrong.add(w); vocabAll.add(w); }
-for (const w of weakTerms(h)) vocabAll.add(w);
+const candUnits = topicUnits(candidateTitle);
+if (!candUnits.length) return false;
+const titleUnits = topicUnits(clusterTitle);
+const headUnits = headlines.map((h) => topicUnits(h));
+const titleCounted = headlines.includes(clusterTitle);
+let strongAnchored = 0;
+let strongTitleShared = 0;
+let topicTitleShared = 0;
+let topicVocabShared = 0;
+const backedUnits = [];
+for (const u of candUnits) {
+const strongTitle = titleUnits.some((v) => sharesAny(u.strong, v.strong));
+const anyTitle = strongTitle || titleUnits.some((v) => sharesAny(u.weak, v.weak));
+let support = 0;
+let strongHead = false;
+let anyHead = false;
+for (const hus of headUnits) {
+const s = hus.some((v) => sharesAny(u.strong, v.strong));
+const a = s || hus.some((v) => sharesAny(u.weak, v.weak));
+if (a) { support++; anyHead = true; if (s) strongHead = true; }
 }
-const strongShared = sharedCount(candStrong, vocabStrong);
-const strongTitleShared = sharedCount(candStrong, titleStrong);
-const titleShared = sharedCount(candAll, titleAll);
-const vocabShared = sharedCount(candAll, vocabAll);
-return (strongShared >= 2 && strongTitleShared >= 1) || (titleShared >= 2 && vocabShared >= 3);
+if (anyTitle && !titleCounted) support++;
+const backed = support >= 2;
+if (backed) backedUnits.push(u);
+if (strongTitle) {
+strongTitleShared++;
+// 固有名詞の共有: 見出し3件以上の裏付けがあり、タイトル側のユニットと
+// 5字以上重なるか、候補ユニットがより長いタイトル側のユニットの
+// 部分文字列で4字以上ある
+if (support >= 3 && titleUnits.some((v) => sharesAny(u.strong, v.strong)
+&& (longestCommonSubstringLen(u.text, v.text) >= 5
+|| (u.text.length >= 4 && v.text.length > u.text.length && v.text.includes(u.text))))) return true;
+}
+if ((strongTitle || strongHead) && backed) strongAnchored++;
+if (anyTitle && backed) topicTitleShared++;
+if (anyTitle || anyHead) topicVocabShared++;
+}
+if (strongAnchored >= 2 && strongTitleShared >= 1) return true;
+if (topicTitleShared >= 2 && topicVocabShared >= 3) return true;
+// 語彙全体との一致が2つだけでも、その2つが同一タイトルユニットの
+// 異なる部分を合計5字以上カバーしていれば、1つの固有名詞を分け合った
+// 一致として通す（うち1つは強い語での一致が必要）
+if (topicTitleShared >= 2 && topicVocabShared >= 2) {
+for (const v of titleUnits) {
+const union = new Array(v.text.length).fill(false);
+let unitCount = 0;
+let anyStrong = false;
+for (const u of backedUnits) {
+const cov = matchedCoverage(u, v);
+if (!cov.some(Boolean)) continue;
+unitCount++;
+if (sharesAny(u.strong, v.strong)) anyStrong = true;
+cov.forEach((c, i) => { if (c) union[i] = true; });
+}
+if (unitCount >= 2 && anyStrong && union.filter(Boolean).length >= 5) return true;
+}
+}
+return false;
 }
 
 /** 見出しから社説検索用の短いトピック語（2〜6字）を抽出する。 */
