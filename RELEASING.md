@@ -26,7 +26,7 @@
 Windows 向けの単一 exe は Node.js の SEA（Single Executable Applications）で作ります。
 
 1. 前提として `npm install` しておく（esbuild と postject が要りますが、どちらもビルド時だけの依存です）。
-2. `npm run build:sea -- --target win32,linux` で `dist/sea/` に生成します。サーバー一式を esbuild で単一ファイルにバンドルし、`public/` を SEA の assets に埋め込んで、Node バイナリへ注入します。Windows  exe は nodejs.org の公式 node.exe（v24 系 LTS）に注入して作るため、ビルド環境が Windows でなくても生成できます。サイズの実測は Windows 版が約90MB、Linux 版が約121MB です。
+2. `npm run build:sea -- --target win32,linux` で `dist/sea/` に生成します。サーバー一式を esbuild で単一ファイルにバンドルし、`public/` を SEA の assets に埋め込んで、Node バイナリへ注入します。Windows  exe は nodejs.org の公式 node.exe に注入して作るため、ビルド環境が Windows でなくても生成できます。使う Node のバージョンは `scripts/build-sea.mjs` の `NODE_VERSION`（現在 v24.22.3）に固定し、ビルド時に公式 SHASUMS256.txt とチェックサム照合してから使います（「最新に追随」はしません）。サイズの実測は Windows 版が約90MB、Linux 版が約121MB です。
 3. blob の生成に使った Node と、注入先バイナリは同じメジャーライン（v24）に揃えます。ずらすと SEA の形式が合わず起動しないことがあります。
 4. タグから作った GitHub Release に `ichigyo-news-win32-x64.exe` を添付します。リリースノートには、未署名のため SmartScreen の警告が出ることと、「詳細情報」→「実行」の進み方を必ず書きます（README の配布節と同じ案内）。あわせて、添付した exe の SHA-256 ハッシュをリリースノートに必ず含めます（利用者がダウンロードしたファイルを照合できるようにするため）。
 5. exe 実行時のデータ保存先は `%APPDATA%\ichigyo-news\`（環境変数 `ICHIGYO_DATA_DIR` で変更可）です。Node.js 版の `data/news.db` とは分けてあります。

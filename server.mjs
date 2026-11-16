@@ -1,5 +1,5 @@
 // ニュースアプリ サーバー（Node標準のみ）。
-// 起動: node server.mjs  （PORT / HOST / ACCESS_TOKEN / NEWS_DB_PATH 環境変数で変更可、既定 8787 / 全インターフェース / 無認証 / data/news.db）
+// 起動: node server.mjs  （PORT / HOST / ACCESS_TOKEN / NEWS_DB_PATH 環境変数で変更可、既定 8787 / 127.0.0.1 / 無認証 / data/news.db）
 // SEA（単一 exe）として実行した場合は、静的ファイルを埋め込み assets から返し、
 // DB はユーザーデータ領域（ICHIGYO_DATA_DIR で上書き可）に置き、既定ブラウザを開く。
 // 収集は「開いた時だけ」: データがあれば即返し、古ければ背後で更新する（stale-while-revalidate）。
@@ -26,7 +26,9 @@ try {
 }
 const PUBLIC_DIR = join(ROOT, 'public');
 const PORT = Number(process.env.PORT || 8787);
-const HOST = process.env.HOST || undefined; // 未指定なら全インターフェースで待ち受け
+// 既定はループバックのみ（2026-11-16 コンプライアンス対応 #1）。LAN 等の別端末から
+// 開きたい場合だけ HOST=0.0.0.0 のように明示指定する（その場合は ACCESS_TOKEN も前提）。
+const HOST = process.env.HOST || '127.0.0.1';
 const ACCESS_TOKEN = process.env.ACCESS_TOKEN || '';
 const AS_SEA = runningAsSea();
 // DB の置き場所: NEWS_DB_PATH が最優先。SEA ではユーザーデータ領域、それ以外は従来の data/news.db
@@ -257,7 +259,7 @@ function apiStory(id) {
 
 /* ---------- HTTP ---------- */
 
-const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.webmanifest': 'application/manifest+json', '.json': 'application/json', '.png': 'image/png', '.svg': 'image/svg+xml' };
+const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.webmanifest': 'application/manifest+json', '.json': 'application/json', '.png': 'image/png', '.svg': 'image/svg+xml', '.txt': 'text/plain; charset=utf-8' };
 
 const SECURITY_HEADERS = {
   'x-content-type-options': 'nosniff',
@@ -266,11 +268,23 @@ const SECURITY_HEADERS = {
   'content-security-policy': "frame-ancestors 'none'",
 };
 
-/** リクエストの JSON ボディを読む（壊れた JSON や空ボディは {} として扱う）。 */
+/** API の JSON ボディの受信上限（バイト）。キーワード登録など小さな入力しか想定していない（2026-11-16 コンプライアンス対応 #7）。 */
+const MAX_JSON_BODY_BYTES = 64 * 1024;
+
+/**
+ * リクエストの JSON ボディを読む（壊れた JSON や空ボディは {} として扱う）。
+ * 上限を超えた分はメモリに載せず読み捨て、結果は {} として扱う。
+ */
 async function readJsonBody(req) {
   const chunks = [];
-  for await (const chunk of req) chunks.push(chunk);
-  if (chunks.length === 0) return {};
+  let total = 0;
+  let tooLarge = false;
+  for await (const chunk of req) {
+    total += chunk.length;
+    if (total > MAX_JSON_BODY_BYTES) { tooLarge = true; continue; }
+    chunks.push(chunk);
+  }
+  if (tooLarge || chunks.length === 0) return {};
   try {
     const parsed = JSON.parse(Buffer.concat(chunks).toString('utf8'));
     return parsed && typeof parsed === 'object' ? parsed : {};
@@ -402,7 +416,7 @@ const server = createServer(async (req, res) => {
 });
 
 server.listen(PORT, HOST, () => {
-  console.log(`ichigyo-news: http://localhost:${PORT} で開いてください（待ち受け: ${HOST || '全インターフェース'}:${PORT}）`);
+  console.log(`ichigyo-news: http://localhost:${PORT} で開いてください（待ち受け: ${HOST}:${PORT}）`);
   if (AS_SEA) {
     console.log(`データの保存先: ${DB_PATH}`);
     openBrowser(`http://localhost:${PORT}`);

@@ -76,6 +76,42 @@ export const AGGREGATORS = ['Yahoo!ニュース', 'au Webポータル', 'SmartNe
 
 const FETCH_TIMEOUT_MS = 8000;
 
+/** 外部応答（RSS）の読み取り上限（バイト）。これを超える応答は異常として打ち切る（2026-11-16 コンプライアンス対応 #7）。 */
+export const MAX_FEED_BYTES = 5 * 1024 * 1024;
+
+/**
+ * fetch の応答をテキストで読む（サイズ上限つき）。
+ * ストリームがあれば上限を超えた時点で読み取りを中断する。ストリームを持たない
+ * 応答（テスト用のスタブ等）は text() の結果をバイト長で判定する。
+ * 上限超過は例外にして、呼び出し側の失敗扱い（フィードのスキップ等）に乗せる。
+ */
+export async function readResponseText(res, limitBytes = MAX_FEED_BYTES) {
+  if (res.body && typeof res.body.getReader === 'function') {
+    const reader = res.body.getReader();
+    const chunks = [];
+    let total = 0;
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      total += value.byteLength;
+      if (total > limitBytes) {
+        await reader.cancel().catch(() => {});
+        throw new Error(`response too large (> ${limitBytes} bytes)`);
+      }
+      chunks.push(value);
+    }
+    const buf = new Uint8Array(total);
+    let offset = 0;
+    for (const chunk of chunks) { buf.set(chunk, offset); offset += chunk.byteLength; }
+    return new TextDecoder().decode(buf);
+  }
+  const text = await res.text();
+  if (Buffer.byteLength(text, 'utf8') > limitBytes) {
+    throw new Error(`response too large (> ${limitBytes} bytes)`);
+  }
+  return text;
+}
+
 // ---------- テキストユーティリティ ----------
 
 export function decodeEntities(s) {
@@ -731,7 +767,7 @@ const timer = setTimeout(() => ctrl.abort(), FETCH_TIMEOUT_MS);
 try {
 const res = await fetchImpl(feed.url, { signal: ctrl.signal, headers: { 'user-agent': 'news-app/0.1 (+personal use)'}});
 if (!res.ok) throw new Error(`HTTP ${res.status}`);
-return parseRss(await res.text(), feed);
+return parseRss(await readResponseText(res), feed);
 } finally {
 clearTimeout(timer);
 }
@@ -825,7 +861,7 @@ const timer = setTimeout(() => ctrl.abort(), FETCH_TIMEOUT_MS);
 const res = await fetchImpl(url, { signal: ctrl.signal, headers: { 'user-agent': 'news-app/0.1 (+personal use)' } });
 clearTimeout(timer);
 if (!res.ok) continue;
-const items = parseRss(await res.text(), {});
+const items = parseRss(await readResponseText(res), {});
 for (const it of items) {
 if (normalizeSource(it.source) !== paper && !it.title.includes(paper)) continue;
 if (!it.title.includes('社説')) continue;
