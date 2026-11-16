@@ -56,6 +56,19 @@ test('標準時: 行パディングは従来のまま（密度で変えない）
   assert.match(row, /padding:\s*16px 20px 14px/, '標準のパディングが変わっています');
 });
 
+test('App.tsx: 密度のデフォルトはコンパクトで、保存済みの standard は尊重する', () => {
+  // 初期化ブロックを取り出して中身を固定する（2026-11-16 実機確認の上でデフォルト化）
+  const m = appTsx.match(/useState<DensitySetting>\(\(\) => \{([\s\S]*?)\}\)/);
+  assert.ok(m, '密度の初期化ブロックがありません');
+  const init = m[1];
+  assert.ok(
+    init.includes("localStorage.getItem('ichigyo:density') === 'standard'"),
+    '保存済み standard を判定するはず',
+  );
+  assert.ok(init.includes(": 'compact'"), '未保存時はコンパクトになるはず');
+  assert.ok(init.includes("return 'compact'"), '読み取り失敗時もコンパクトになるはず');
+});
+
 test('App.tsx: 密度設定は localStorage（ichigyo:density）に保存し、一覧へ is-compact で適用する', () => {
   assert.ok(appTsx.includes("localStorage.getItem('ichigyo:density')"), 'ichigyo:density の読み込みがありません');
   assert.ok(appTsx.includes("localStorage.setItem('ichigyo:density', density)"), 'ichigyo:density の保存がありません');

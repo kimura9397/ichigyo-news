@@ -263,11 +263,13 @@ function App() {
   )
   const [density, setDensity] = useState<DensitySetting>(() => {
     try {
-      return localStorage.getItem('ichigyo:density') === 'compact'
-        ? 'compact'
-        : 'standard'
+      // 未保存時のデフォルトはコンパクト（2026-11-16 実機確認の上で決定）。
+      // 保存済みの値（standard / compact）はそのまま尊重する。
+      return localStorage.getItem('ichigyo:density') === 'standard'
+        ? 'standard'
+        : 'compact'
     } catch {
-      return 'standard'
+      return 'compact'
     }
   })
   const [dimRead, setDimRead] = useState<boolean>(() => {
