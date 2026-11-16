@@ -1,9 +1,11 @@
 // スポットライト表示（2026-11-16 ユーザー承認、同日改修）。
-// 今開いているビュー（タブ／検索／ウォッチ／ブックマーク）の一覧の上位10件を
+// 今開いているビュー（タブ／検索／ウォッチ／ブックマーク）の一覧の全件を
 // 1件ずつ大きく（新聞の一面のイメージで）表示し、設定した表示時間（既定20秒）
 // ごとに次へ進む常駐表示モード。対象が重要タブ固定だった初期版から、
 // 「重要は入れ替わりが遅く、同じニュースが流れ続ける」というユーザー指摘で
-// 現在のビューの一覧を流す形に変更した（2026-11-16）。
+// 現在のビューの一覧を流す形に変更した（2026-11-16）。当初は上位10件だけ
+// だったが、「一覧で保持してるのをずっと流し続けたい」というユーザー指示で
+// 一覧の全件を先頭から末尾まで流してループする形に変更した（同日）。
 // 社説タブから開いた場合は、各紙の表示も社説中心（社説の見出しと本文）に寄せる。
 // ポーリング・全画面とは独立に動く。表示中はマストヘッドを隠し、画面全体を使う。
 // 再取得（更新）が完了したら、そのビューの最新の一覧で1件目から流し直し、
@@ -19,8 +21,8 @@ import { useEffect, useRef, useState } from 'react'
 import { fetchClusterDetail, fetchTabRows, formatWhen, safeUrl } from './api'
 import type { FeedTab, StoryRow } from './types'
 
-/** ローテーション対象は現在のビューの一覧の上位この件数まで */
-const TOP_COUNT = 10
+/** 一覧取得のページサイズ（一覧側の loadPage と同じ100件ずつ、全ページを辿って全件を保持する） */
+const PAGE_SIZE = 100
 /** 流し直しの通知を出す時間 */
 const NOTICE_MS = 3_500
 
@@ -76,6 +78,9 @@ export default function Spotlight({
   const [notice, setNotice] = useState<string | null>(null)
 
   const itemsRef = useRef<StoryRow[]>([])
+  /** 組み直しの世代。全件取得には時間がかかるため、古い組み直しの結果が
+   *  新しい組み直しを上書きしないよう、開始順を数えておく */
+  const rebuildSeqRef = useRef(0)
   const slotRef = useRef(0)
   const slotStartRef = useRef(0)
   const detailsRef = useRef<Record<number, DetailEntry>>({})
@@ -137,21 +142,41 @@ export default function Spotlight({
       : c.summary || (c.headline && !c.editorial),
   )
 
-  /** ローテーション対象を現在のビューの最新上位で組み直し、1件目から流し直す。
+  /** ローテーション対象を現在のビューの一覧の全件で組み直し、1件目から
+   *  流し直す。一覧はページ分割されているので、全ページを辿って全件を
+   *  保持する（取得条件の組み立ては一覧側の loadPage と同じ）。
    *  notify が true のときは「更新しました」の通知も出す（再取得の完了時）。 */
   const rebuild = async (notify: boolean) => {
+    const seq = ++rebuildSeqRef.current
     try {
       const src = sourceRef.current
-      const page = await fetchTabRows(
-        src.sourceTab,
-        src.sourceCategory,
-        0,
-        TOP_COUNT,
-        src.mutedCategories,
-        src.sourceWatchKeywords,
-      )
-      itemsRef.current = page.rows
-      setItems(page.rows)
+      const all: StoryRow[] = []
+      const seen = new Set<string>()
+      let offset = 0
+      let total = Number.POSITIVE_INFINITY
+      while (all.length < total) {
+        const page = await fetchTabRows(
+          src.sourceTab,
+          src.sourceCategory,
+          offset,
+          PAGE_SIZE,
+          src.mutedCategories,
+          src.sourceWatchKeywords,
+        )
+        total = page.total
+        if (page.rows.length === 0) break
+        // 取得の途中で一覧がずれて同じ行が重なって返っても、1件として数える
+        for (const row of page.rows) {
+          if (seen.has(row.id)) continue
+          seen.add(row.id)
+          all.push(row)
+        }
+        offset += page.rows.length
+      }
+      // 取得中に新しい組み直しが始まっていたら、古い結果は破棄する
+      if (seq !== rebuildSeqRef.current) return
+      itemsRef.current = all
+      setItems(all)
       slotRef.current = 0
       setSlot(0)
       slotStartRef.current = Date.now()
@@ -161,7 +186,7 @@ export default function Spotlight({
     } catch {
       /* 取得に失敗したら今のローテーションを続ける */
     } finally {
-      setLoaded(true)
+      if (seq === rebuildSeqRef.current) setLoaded(true)
     }
   }
   const rebuildRef = useRef(rebuild)

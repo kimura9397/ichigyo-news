@@ -1229,7 +1229,7 @@ function App() {
               className="spotlight-start"
               onClick={() => setSpotlightActive(true)}
               disabled={spotlightActive}
-              title="重要タブの上位10件を1件ずつ大きく表示します"
+              title="今開いているビューの一覧を1件ずつ大きく表示します"
             >
               <svg
                 width="15"
