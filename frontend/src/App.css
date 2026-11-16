@@ -10,12 +10,20 @@
   justify-content: space-between;
   gap: 24px;
   align-items: center;
-  padding: 16px 32px 12px;
+  padding: 10px 32px 8px;
   border-bottom: 3px solid var(--ink);
 }
 
+/* ブランドはタイトルとタグラインを横並び1行に収める（2026-11-16 ユーザー指示、Issue #5）。
+   明朝体はタイトル（.brand h1）のみ、タグラインはゴシックのまま */
+.brand {
+  display: flex;
+  align-items: baseline;
+  gap: 14px;
+}
+
 .brand-kicker {
-  margin: 0 0 2px;
+  margin: 0;
   font-size: 11px;
   letter-spacing: 0.18em;
   color: var(--muted);
@@ -32,29 +40,9 @@
   line-height: 1;
 }
 
-.masthead-note {
-  margin: 0;
-  max-width: 19rem;
-  font-size: calc(12px * var(--font-scale));
-  line-height: 1.6;
-  color: var(--muted);
-  text-align: end;
-}
-
-/* 説明文は文ごとにブロック化し、文の途中ではなく区切りで改行させる */
-.masthead-note > span {
-  display: block;
-}
-
-/* 説明文と連絡先行を縦に積む、マストヘッド右側のテキスト群 */
-.masthead-text {
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-  min-width: 0;
-}
-
-/* 要望・不具合の報告先を示す控えめな連絡先行。リンクだけアクセント色にする */
+/* 要望・不具合の報告先を示す控えめな連絡先行。リンクだけアクセント色にする。
+   ノート文（各紙の報道と社説を一行に。続報は版で重ねます。）は 2026-11-16 の
+   ユーザー指示で削除した（Issue #5。文言は README 等の説明に残る） */
 .masthead-contact {
   margin: 0;
   font-size: calc(11px * var(--font-scale));
@@ -247,6 +235,34 @@
 .row-foot .badges {
   float: right;
   margin-left: 8px;
+}
+
+/* --- 一覧の密度: コンパクト（2026-11-16 ユーザー決定、Issue #4） ---
+   設定「一覧の密度」で切り替える。コンパクト時はフッター行を廃して中身を
+   メタ行へ畳み（下記 .row-meta .badges）、リード文を1行に絞り、余白を詰めて
+   1画面に入る行数を増やす。フォントサイズは変えない（「文字の大きさ」設定に任せる）。
+   標準時は .list-pane に is-compact が付かず、このブロックは効かない */
+
+/* コンパクト時にメタ行へ移したバッジは、フッター行と同じく右端へ float で寄せる */
+.row-meta .badges {
+  float: right;
+  margin-left: 8px;
+}
+
+.list-pane.is-compact .row {
+  padding: 10px 20px 9px;
+}
+
+.list-pane.is-compact .row-title {
+  margin: 3px 0 2px;
+}
+
+.list-pane.is-compact .row-lead {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 1;
+  line-clamp: 1;
+  overflow: hidden;
 }
 
 .editorial-papers {
@@ -461,12 +477,7 @@
     flex-direction: column;
     align-items: start;
     gap: 12px;
-    padding: 14px 16px 12px;
-  }
-
-  .masthead-note {
-    text-align: start;
-    max-width: none;
+    padding: 10px 16px 8px;
   }
 
   .masthead-contact {
@@ -521,7 +532,7 @@
 
 /* --- 実API連携に伴う最小限の追加 --- */
 
-/* 説明文と操作群は縦に積まず横に並べ、マストヘッドの縦幅を抑える */
+/* 連絡先行と操作群は縦に積まず横に並べ、マストヘッドの縦幅を抑える */
 .masthead-side {
   display: flex;
   flex-direction: row;
@@ -885,11 +896,17 @@
 @media (max-width: 560px) {
   /* 副題（brand-kicker）を1行に収めるため、マストヘッドを少し締める */
   .masthead {
-    padding: 12px 16px 10px;
+    padding: 8px 16px 8px;
+  }
+
+  /* タイトルとの横並びが窮屈になるため、タグラインを少し小さくする */
+  .brand {
+    gap: 10px;
   }
 
   .brand-kicker {
-    letter-spacing: 0.12em;
+    font-size: 10px;
+    letter-spacing: 0.1em;
   }
 
   .brand h1 {
@@ -909,6 +926,13 @@
   .search-nav {
     margin: 0 6px;
     padding: 6px 9px;
+  }
+}
+
+/* 極狭幅ではタイトルとの横並びが収まらないため、タグラインを落とす（Issue #5 の逃がし） */
+@media (max-width: 340px) {
+  .brand-kicker {
+    display: none;
   }
 }
 

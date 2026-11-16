@@ -99,6 +99,9 @@ type DetailState = 'loading' | 'loaded'
 type EditorialState = 'unchecked' | 'loading' | 'done'
 type BodyState = 'loading' | 'done'
 type FontSizeSetting = 'small' | 'medium' | 'large'
+/** 一覧の密度（2026-11-16 ユーザー決定、Issue #4）。コンパクトは行の構造を詰めて
+ * 1画面に入る行数を増やす（モニター用途）。フォントサイズは変えない */
+type DensitySetting = 'standard' | 'compact'
 /**
  * テーマプリセット（2026-11-16 ユーザー決定）。旧「テーマ（ライト/ダーク/端末）」と
  * 「アクセント色（5色）」を一本化したもので、各プリセットがパレット全体を決める。
@@ -258,6 +261,15 @@ function App() {
   const [themePreset, setThemePreset] = useState<ThemePreset>(
     initialThemePreset,
   )
+  const [density, setDensity] = useState<DensitySetting>(() => {
+    try {
+      return localStorage.getItem('ichigyo:density') === 'compact'
+        ? 'compact'
+        : 'standard'
+    } catch {
+      return 'standard'
+    }
+  })
   const [dimRead, setDimRead] = useState<boolean>(() => {
     try {
       return localStorage.getItem('ichigyo:dimRead') !== '0'
@@ -332,6 +344,14 @@ function App() {
     mq.addEventListener('change', apply)
     return () => mq.removeEventListener('change', apply)
   }, [themePreset])
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('ichigyo:density', density)
+    } catch {
+      /* 同上 */
+    }
+  }, [density])
 
   useEffect(() => {
     try {
@@ -1169,28 +1189,22 @@ function App() {
     <div className="shell">
       <header className="masthead">
         <div className="brand">
-          <p className="brand-kicker">一行で、五紙を読む。</p>
           <h1>一行ニュース</h1>
+          <p className="brand-kicker">一行で、五紙を読む。</p>
         </div>
         <div className="masthead-side">
-          <div className="masthead-text">
-            <p className="masthead-note">
-              <span>各紙の報道と社説を一行に。</span>
-              <span>続報は版で重ねます。</span>
-            </p>
-            <p className="masthead-contact">
-              要望・不具合の報告は
-              <a
-                href="https://x.com/ichigyo_news"
-                target="_blank"
-                rel="noopener noreferrer"
-                aria-label="X（@ichigyo_news）"
-              >
-                X
-              </a>
-              まで
-            </p>
-          </div>
+          <p className="masthead-contact">
+            要望・不具合の報告は
+            <a
+              href="https://x.com/ichigyo_news"
+              target="_blank"
+              rel="noopener noreferrer"
+              aria-label="X（@ichigyo_news）"
+            >
+              X
+            </a>
+            まで
+          </p>
           <div className="masthead-actions">
             {bgRefreshing ? (
               <span className="refreshing-note">背後で更新中…</span>
@@ -1305,6 +1319,33 @@ function App() {
                             }
                             onClick={() => setFontSize(value)}
                             aria-pressed={fontSize === value}
+                          >
+                            {label}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                    <div className="menu-row">
+                      <span className="menu-label">一覧の密度</span>
+                      <div
+                        className="segmented"
+                        role="group"
+                        aria-label="一覧の密度"
+                      >
+                        {(
+                          [
+                            ['standard', '標準'],
+                            ['compact', 'コンパクト'],
+                          ] as const
+                        ).map(([value, label]) => (
+                          <button
+                            key={value}
+                            type="button"
+                            className={
+                              density === value ? 'seg is-active' : 'seg'
+                            }
+                            onClick={() => setDensity(value)}
+                            aria-pressed={density === value}
                           >
                             {label}
                           </button>
@@ -1736,7 +1777,9 @@ function App() {
         style={{ '--list-ratio': paneRatio } as CSSProperties}
       >
         <section
-          className="list-pane"
+          className={
+            density === 'compact' ? 'list-pane is-compact' : 'list-pane'
+          }
           aria-label="ニュース一覧"
           onFocus={acknowledgeNew}
           onPointerDown={acknowledgeNew}
@@ -1763,6 +1806,31 @@ function App() {
               <ul>
                 {visible.map((story) => {
                   const isActive = selected?.id === story.id
+                  // フッター行の中身（コンパクト時はメタ行へ畳む、Issue #4）
+                  const coverageNote = (
+                    <span>
+                      {story.coverages.length}紙
+                      {story.version === 1 ? ' · 初報' : ' · 続報'}
+                      {tab === 'editorials' &&
+                      story.editorialPapers &&
+                      story.editorialPapers.length > 0 ? (
+                        <span className="editorial-papers">
+                          {' · 社説 '}
+                          {story.editorialPapers.join('・')}
+                        </span>
+                      ) : null}
+                    </span>
+                  )
+                  const rowBadges = (
+                    <span className="badges">
+                      {story.isImportant ? (
+                        <span className="badge important">重要</span>
+                      ) : null}
+                      {story.isNew ? (
+                        <span className="badge fresh">新着</span>
+                      ) : null}
+                    </span>
+                  )
                   const rowClass = [
                     'row',
                     isActive ? 'is-active' : '',
@@ -1802,31 +1870,21 @@ function App() {
                               {formatWhen(story.publishedAt)}
                             </time>
                             <span className="category">{story.category}</span>
+                            {density === 'compact' ? (
+                              <>
+                                {coverageNote}
+                                {rowBadges}
+                              </>
+                            ) : null}
                           </div>
                           <p className="row-title">{story.title}</p>
                           <p className="row-lead">{story.lead}</p>
-                          <div className="row-foot">
-                            <span>
-                              {story.coverages.length}紙
-                              {story.version === 1 ? ' · 初報' : ' · 続報'}
-                              {tab === 'editorials' &&
-                              story.editorialPapers &&
-                              story.editorialPapers.length > 0 ? (
-                                <span className="editorial-papers">
-                                  {' · 社説 '}
-                                  {story.editorialPapers.join('・')}
-                                </span>
-                              ) : null}
-                            </span>
-                            <span className="badges">
-                              {story.isImportant ? (
-                                <span className="badge important">重要</span>
-                              ) : null}
-                              {story.isNew ? (
-                                <span className="badge fresh">新着</span>
-                              ) : null}
-                            </span>
-                          </div>
+                          {density === 'compact' ? null : (
+                            <div className="row-foot">
+                              {coverageNote}
+                              {rowBadges}
+                            </div>
+                          )}
                         </div>
                       </button>
                     </li>
