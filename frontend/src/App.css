@@ -655,6 +655,7 @@
 /* ポーリング間隔のセグメントコントロール */
 .segmented {
   display: inline-flex;
+  flex-wrap: wrap;
   gap: 2px;
   padding: 2px;
   border-radius: 999px;
@@ -1030,6 +1031,17 @@
   padding: 5px 0;
 }
 
+/* 選択肢グループ（セグメント／テーマの色見本）を持つ行は、ラベルとグループを
+   1行に収めようとせず縦に積む（2026-11-16 ユーザー指示）。パネル幅に収まらず
+   横スクロールが必要になるくらいなら配置を工夫する、という方針。
+   スイッチだけの行は従来どおり横並びのまま */
+.menu-row.is-stack {
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: flex-start;
+  gap: 6px;
+}
+
 .menu-label {
   font-size: 13px;
   /* ラベル列が潰れて1文字ずつ縦に割れるのを防ぐ（2026-11-16 実機報告: 「テーマ」が
@@ -1296,18 +1308,21 @@
   box-shadow: none;
 }
 
+/* スポットライトは必ず1画面に収める（2026-11-16 ユーザー指示）。
+   ルートをビューポート高に固定した flex 列にし、はみ出す分は各紙カードの
+   抜粋を行数クランプで切り落として吸収する。スクロールは出さない */
 .spotlight {
   flex: 1;
   min-height: 0;
-  overflow: auto;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
   background: var(--paper);
-  padding: 0 clamp(16px, 3vw, 56px) 56px;
+  padding: 0 clamp(16px, 3vw, 56px) 28px;
 }
 
 .spotlight-head {
-  position: sticky;
-  top: 0;
-  z-index: 2;
+  flex: none;
   background: var(--paper);
   padding-top: 14px;
 }
@@ -1373,11 +1388,17 @@
 }
 
 .spotlight-story {
-  padding-top: clamp(26px, 4.5vh, 52px);
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  padding-top: clamp(18px, 3vh, 40px);
 }
 
 .spotlight-meta {
   display: flex;
+  flex: none;
   flex-wrap: wrap;
   align-items: center;
   gap: 8px 14px;
@@ -1396,36 +1417,104 @@
 
 .spotlight-title {
   margin: 0;
+  flex: none;
   font-size: calc(var(--fs-detail-title) * 2.75);
   font-weight: 800;
   line-height: 1.3;
   letter-spacing: 0.01em;
   color: var(--ink);
+  /* 大きさは維持しつつ、極端に長い見出しでも各紙の領域を食い潰さないよう
+     行数だけは上限を設ける */
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  overflow: hidden;
 }
 
 .spotlight-lead {
   margin: 18px 0 0;
+  flex: none;
   max-width: 80ch;
   font-size: calc(17px * var(--font-scale));
   line-height: 1.85;
   color: var(--ink);
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
 }
 
 .spotlight-papers {
+  /* 残りの高さをすべて受け取り、行ごとに均等配分する。カード側は
+     min-height: 0 と overflow: hidden で割り当てを超えない */
+  flex: 1;
+  min-height: 0;
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  grid-auto-rows: minmax(0, 1fr);
   gap: 26px 32px;
-  margin-top: 34px;
+  margin-top: 26px;
   border-top: 3px solid var(--ink);
-  padding-top: 22px;
+  padding-top: 18px;
+  /* 抜粋の表示行数（切り落としの量）。紙数と画面の高さ・幅で切り替える。
+     基準値は 1080p・文字サイズ「大」・見出し2行＋リードありのケースで
+     収まるよう決めた。「大」はフォントが一番大きくなるため、他の
+     文字サイズでは同じ行数でも余裕側に倒れる */
+  --summary-lines: 8;
+}
+
+/* 紙が多い（2行に折れる）場合は1紙あたりの行数を減らす */
+.spotlight-papers.is-many {
+  --summary-lines: 4;
+}
+
+/* 背の高い画面（おおむね1440p以上）では切り落としを緩める */
+@media (min-height: 1500px) {
+  .spotlight-papers {
+    --summary-lines: 14;
+  }
+
+  .spotlight-papers.is-many {
+    --summary-lines: 8;
+  }
+}
+
+/* 背の低い画面では見出しと余白も詰め、クランプ側に倒す */
+@media (max-height: 820px) {
+  .spotlight-story {
+    padding-top: 14px;
+  }
+
+  .spotlight-title {
+    font-size: calc(var(--fs-detail-title) * 2.1);
+  }
+
+  .spotlight-lead {
+    -webkit-line-clamp: 1;
+  }
+
+  .spotlight-papers {
+    --summary-lines: 5;
+    margin-top: 18px;
+    padding-top: 12px;
+  }
+
+  .spotlight-papers.is-many {
+    --summary-lines: 2;
+  }
 }
 
 .spotlight-paper {
   min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
 }
 
 .spotlight-paper-kicker {
   display: flex;
+  flex: none;
   justify-content: space-between;
   align-items: baseline;
   gap: 10px;
@@ -1443,13 +1532,27 @@
 
 .spotlight-paper h3 {
   margin: 0 0 6px;
+  flex: none;
   font-size: calc(var(--fs-paper-title) * 1.05);
   line-height: 1.5;
   color: var(--ink);
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
 }
 
 .spotlight-paper-summary {
   margin: 0;
+  /* 割り当てられた高さに収まる行数だけ見せ、残りは切り落とす。
+     flex の縮みも効かせてあり、極端に背の低い画面では抜粋側が縮んで
+     吸収する（スクロールだけは絶対に出さない） */
+  flex: 0 1 auto;
+  min-height: 0;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: var(--summary-lines);
   font-size: calc(13.5px * var(--font-scale));
   line-height: 1.8;
   color: var(--ink);
@@ -1458,7 +1561,12 @@
 
 .spotlight-paper-link {
   display: inline-block;
-  margin-top: 8px;
+  flex: none;
+  align-self: flex-start;
+  /* カードに余白がある場合はリンクをカード下端に寄せる。余裕がない
+     場合は auto マージンが潰れて抜粋の直後に付く */
+  margin-top: auto;
+  padding-top: 8px;
   font-size: calc(12.5px * var(--font-scale));
   color: var(--vermillion);
   text-decoration: underline;
@@ -1466,6 +1574,7 @@
 }
 
 .spotlight-note {
+  flex: none;
   padding-top: 40px;
   font-size: calc(14px * var(--font-scale));
   color: var(--muted);
@@ -1473,14 +1582,20 @@
 
 @media (max-width: 860px) {
   .spotlight {
-    padding: 0 18px 36px;
+    padding: 0 18px 20px;
   }
 
   .spotlight-title {
     font-size: calc(var(--fs-detail-title) * 1.5);
   }
 
+  /* 狭幅では各紙が縦に積まれて行数が増えるため、抜粋はさらに絞る */
   .spotlight-papers {
     grid-template-columns: 1fr;
+    --summary-lines: 3;
+  }
+
+  .spotlight-papers.is-many {
+    --summary-lines: 1;
   }
 }

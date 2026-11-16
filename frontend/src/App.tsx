@@ -667,6 +667,18 @@ function App() {
         ? `q:${searchQuery}`
         : '',
   )
+  // スポットライトが流す対象は「今開いているビュー」の一覧（2026-11-16
+  // ユーザー指示で重要タブ固定から変更）。loadPage と同じ条件で組み立てる
+  const spotlightWatchKeywords =
+    tab === 'watch'
+      ? watchKeyword
+        ? [watchKeyword]
+        : keywords
+      : tab === 'search'
+        ? searchQuery
+          ? [searchQuery]
+          : []
+        : []
   const page = pages[key] ?? null
 
   const loadPage = useCallback(
@@ -1277,7 +1289,7 @@ function App() {
                 <div className="menu-panel" role="menu" aria-label="設定">
                   <section className="menu-section">
                     <h3>表示</h3>
-                    <div className="menu-row">
+                    <div className="menu-row is-stack">
                       <span className="menu-label">文字の大きさ</span>
                       <div
                         className="segmented"
@@ -1305,7 +1317,7 @@ function App() {
                         ))}
                       </div>
                     </div>
-                    <div className="menu-row">
+                    <div className="menu-row is-stack">
                       <span className="menu-label">一覧の密度</span>
                       <div
                         className="segmented"
@@ -1332,7 +1344,7 @@ function App() {
                         ))}
                       </div>
                     </div>
-                    <div className="menu-row">
+                    <div className="menu-row is-stack">
                       <span className="menu-label">
                         スポットライトの表示時間
                       </span>
@@ -1356,7 +1368,7 @@ function App() {
                         ))}
                       </div>
                     </div>
-                    <div className="menu-row">
+                    <div className="menu-row is-stack">
                       <span className="menu-label">テーマ</span>
                       <div
                         className="preset-swatches"
@@ -1566,7 +1578,10 @@ function App() {
       {spotlightActive ? (
         <Spotlight
           refreshGen={refreshGen}
+          sourceTab={tab}
+          sourceCategory={category}
           mutedCategories={mutedCategories}
+          sourceWatchKeywords={spotlightWatchKeywords}
           rotateMs={spotlightSeconds * 1000}
           onStop={() => setSpotlightActive(false)}
         />

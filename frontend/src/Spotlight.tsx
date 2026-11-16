@@ -1,16 +1,22 @@
 // スポットライト表示（2026-11-16 ユーザー承認、同日改修）。
-// 重要タブの上位10件を1件ずつ大きく（新聞の一面のイメージで）表示し、
-// 設定した表示時間（既定20秒）ごとに次へ進む常駐表示モード。
+// 今開いているビュー（タブ／検索／ウォッチ／ブックマーク）の一覧の上位10件を
+// 1件ずつ大きく（新聞の一面のイメージで）表示し、設定した表示時間（既定20秒）
+// ごとに次へ進む常駐表示モード。対象が重要タブ固定だった初期版から、
+// 「重要は入れ替わりが遅く、同じニュースが流れ続ける」というユーザー指摘で
+// 現在のビューの一覧を流す形に変更した（2026-11-16）。
+// 社説タブから開いた場合は、各紙の表示も社説中心（社説の見出しと本文）に寄せる。
 // ポーリング・全画面とは独立に動く。表示中はマストヘッドを隠し、画面全体を使う。
-// 再取得（更新）が完了したら、最新の一覧で1件目から流し直し、「更新しました」と
-// 短く知らせる（2026-11-16 改修で、表示中の記事を維持する旧挙動から変更）。
+// 再取得（更新）が完了したら、そのビューの最新の一覧で1件目から流し直し、
+// 「更新しました」と短く知らせる（表示中の記事を維持する旧挙動から変更）。
+// 表示は必ず1画面に収める（スクロールさせない）。収まらない分は各紙の
+// 抜粋を行数クランプで切り落とす（2026-11-16 ユーザー指示）。
 // 停止は表示内の「スポットライトを停止」ボタンだけ（ユーザーの明示指示）:
 // マウス移動・他の場所のクリック・キー操作では止めない。
 import { useEffect, useRef, useState } from 'react'
 import { fetchClusterDetail, fetchTabRows, formatWhen, safeUrl } from './api'
-import type { StoryRow } from './types'
+import type { FeedTab, StoryRow } from './types'
 
-/** ローテーション対象は重要タブの上位この件数まで */
+/** ローテーション対象は現在のビューの一覧の上位この件数まで */
 const TOP_COUNT = 10
 /** 流し直しの通知を出す時間 */
 const NOTICE_MS = 3_500
@@ -18,8 +24,14 @@ const NOTICE_MS = 3_500
 interface SpotlightProps {
   /** 一覧の再読み込みが完了するたびに増える世代カウンタ（組み直しの契機） */
   refreshGen: number
+  /** 流す対象のビュー（開始時点で開いていたタブ／ビュー） */
+  sourceTab: FeedTab
+  /** 流す対象のカテゴリフィルタ（開始時点のもの） */
+  sourceCategory: string
   /** 重要タブのミュートカテゴリ（重要タブの取得条件に合わせる） */
   mutedCategories: string[]
+  /** ウォッチ／検索ビューの照合キーワード（他ビューでは空） */
+  sourceWatchKeywords: string[]
   /** 1件あたりの表示時間（ミリ秒）。設定で変更でき、次の見出しから反映される */
   rotateMs: number
   onStop: () => void
@@ -34,10 +46,15 @@ interface DetailEntry {
 
 export default function Spotlight({
   refreshGen,
+  sourceTab,
+  sourceCategory,
   mutedCategories,
+  sourceWatchKeywords,
   rotateMs,
   onStop,
 }: SpotlightProps) {
+  /** 社説タブから開いた場合は各紙の表示を社説中心にする */
+  const editorialMode = sourceTab === 'editorials'
   const [items, setItems] = useState<StoryRow[]>([])
   const [loaded, setLoaded] = useState(false)
   const [slot, setSlot] = useState(0)
@@ -52,7 +69,20 @@ export default function Spotlight({
   const detailsRef = useRef<Record<number, DetailEntry>>({})
   const requestedRef = useRef<Set<string>>(new Set())
   const lastGenRef = useRef(refreshGen)
-  const mutedKey = mutedCategories.join(',')
+  // 流す対象のビュー。表示中はマストヘッドもタブも隠れていて対象は変わらないが、
+  // 組み直しのたびに最新の props で取得できるよう ref に寄せておく
+  const sourceRef = useRef({
+    sourceTab,
+    sourceCategory,
+    mutedCategories,
+    sourceWatchKeywords,
+  })
+  sourceRef.current = {
+    sourceTab,
+    sourceCategory,
+    mutedCategories,
+    sourceWatchKeywords,
+  }
   // 表示時間の設定値（最新の props）と、表示中の見出しに適用中の値。
   // 設定を変えても表示中の見出しは切り替わらず、次の見出しから新しい値を使う。
   const rotateMsRef = useRef(rotateMs)
@@ -86,22 +116,27 @@ export default function Spotlight({
       ? currentDetail.row
       : null
   const displayRow = detailRow ?? current
-  // 各紙の RSS 抜粋: 抜粋本文があるもの、または記事見出しのみのものを出す。
-  // 社説だけの coverage（記事なし）はこの表示の対象外。
-  const paperCoverages = (detailRow?.coverages ?? []).filter(
-    (c) => c.summary || (c.headline && !c.editorial),
+  // 各紙の表示内容。通常は RSS 抜粋（抜粋本文があるもの、または記事見出しのみの
+  // もの。社説だけの coverage は対象外）。社説タブから開いた場合は社説が
+  // 確認できた紙だけを出し、カードの中身も社説に寄せる。
+  const paperCoverages = (detailRow?.coverages ?? []).filter((c) =>
+    editorialMode
+      ? Boolean(c.editorial)
+      : c.summary || (c.headline && !c.editorial),
   )
 
-  /** ローテーション対象を重要タブの最新上位で組み直し、1件目から流し直す。
+  /** ローテーション対象を現在のビューの最新上位で組み直し、1件目から流し直す。
    *  notify が true のときは「更新しました」の通知も出す（再取得の完了時）。 */
   const rebuild = async (notify: boolean) => {
     try {
+      const src = sourceRef.current
       const page = await fetchTabRows(
-        'important',
-        'すべて',
+        src.sourceTab,
+        src.sourceCategory,
         0,
         TOP_COUNT,
-        mutedKey ? mutedKey.split(',') : [],
+        src.mutedCategories,
+        src.sourceWatchKeywords,
       )
       itemsRef.current = page.rows
       setItems(page.rows)
@@ -133,14 +168,6 @@ export default function Spotlight({
     lastGenRef.current = refreshGen
     void rebuildRef.current(true)
   }, [refreshGen])
-
-  // ミュートカテゴリが変わったら組み直す（通知は出さない）
-  const lastMutedRef = useRef(mutedKey)
-  useEffect(() => {
-    if (mutedKey === lastMutedRef.current) return
-    lastMutedRef.current = mutedKey
-    void rebuildRef.current(false)
-  }, [mutedKey])
 
   // 表示時間ごとのローテーションとプログレスバー。
   // 表示中の見出しの表示時間は slotMsRef に固定し、設定変更は次の見出しから反映する
@@ -255,39 +282,73 @@ export default function Spotlight({
 
           {detailRow ? (
             paperCoverages.length > 0 ? (
-              <div className="spotlight-papers">
-                {paperCoverages.map((c) => (
-                  <section key={c.outletId} className="spotlight-paper">
-                    <p className="spotlight-paper-kicker">
-                      <span>{c.outletName}</span>
-                      {c.publishedAt ? (
-                        <time dateTime={c.publishedAt}>
-                          {formatWhen(c.publishedAt)}
-                        </time>
+              <div
+                className={`spotlight-papers ${
+                  paperCoverages.length >= 6 ? 'is-many' : 'is-few'
+                }`}
+              >
+                {paperCoverages.map((c) => {
+                  // 社説モードではカードの見出し・本文・リンクを社説に寄せる。
+                  // 社説テキストは先頭に社説の見出しを含む形で組み立てられて
+                  // いるため、見出しとして別に出す場合は先頭行を取り除く
+                  const cardTitle = editorialMode
+                    ? c.editorialTitle || c.headline
+                    : c.headline
+                  let cardBody = editorialMode ? c.editorial : c.summary
+                  if (
+                    editorialMode &&
+                    cardBody &&
+                    c.editorialTitle &&
+                    cardBody.startsWith(c.editorialTitle)
+                  ) {
+                    cardBody =
+                      cardBody.slice(c.editorialTitle.length).replace(/^\n+/, '') ||
+                      undefined
+                  }
+                  const cardUrl = safeUrl(
+                    editorialMode ? c.editorialUrl : c.url,
+                  )
+                  return (
+                    <section key={c.outletId} className="spotlight-paper">
+                      <p className="spotlight-paper-kicker">
+                        <span>{c.outletName}</span>
+                        {c.publishedAt ? (
+                          <time dateTime={c.publishedAt}>
+                            {formatWhen(c.publishedAt)}
+                          </time>
+                        ) : null}
+                      </p>
+                      {cardTitle ? <h3>{cardTitle}</h3> : null}
+                      {cardBody ? (
+                        <p className="spotlight-paper-summary">{cardBody}</p>
                       ) : null}
-                    </p>
-                    {c.headline ? <h3>{c.headline}</h3> : null}
-                    {c.summary ? (
-                      <p className="spotlight-paper-summary">{c.summary}</p>
-                    ) : null}
-                    {safeUrl(c.url) ? (
-                      <a
-                        className="spotlight-paper-link"
-                        href={safeUrl(c.url)}
-                        target="_blank"
-                        rel="noreferrer"
-                      >
-                        元記事を読む
-                      </a>
-                    ) : null}
-                  </section>
-                ))}
+                      {cardUrl ? (
+                        <a
+                          className="spotlight-paper-link"
+                          href={cardUrl}
+                          target="_blank"
+                          rel="noreferrer"
+                        >
+                          {editorialMode ? '社説の元記事を読む' : '元記事を読む'}
+                        </a>
+                      ) : null}
+                    </section>
+                  )
+                })}
               </div>
             ) : (
-              <p className="spotlight-note">各紙の抜粋はまだありません。</p>
+              <p className="spotlight-note">
+                {editorialMode
+                  ? '社説はまだ確認できていません。'
+                  : '各紙の抜粋はまだありません。'}
+              </p>
             )
           ) : (
-            <p className="spotlight-note">各紙の抜粋を読み込み中…</p>
+            <p className="spotlight-note">
+              {editorialMode
+                ? '社説を読み込み中…'
+                : '各紙の抜粋を読み込み中…'}
+            </p>
           )}
         </article>
       )}
