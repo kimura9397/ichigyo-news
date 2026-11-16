@@ -21,7 +21,7 @@ const ids = {};
 function seed(dbPath) {
   const db = openDb(dbPath);
   const now = new Date().toISOString();
-  const mk = (title, category, score, { source = '朝日', author = '', summary = '要約' } = {}) => {
+  const mk = (title, category, score, { source = '朝日', summary = '要約' } = {}) => {
     const c = db.prepare(
       'INSERT INTO clusters (title, title_norm, category, first_seen_at, last_seen_at, importance_score) VALUES (?, ?, ?, ?, ?, ?)',
     ).run(title, normalizeForSearch(title), category, now, now, score);
@@ -31,11 +31,11 @@ function seed(dbPath) {
     ).run(cid, title, now);
     const vid = Number(v.lastInsertRowid);
     db.prepare(
-      'INSERT INTO articles (cluster_id, version_id, source, title, url, summary, published_at, fetched_at, author, search_text) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-    ).run(cid, vid, source, title, `https://example.com/${cid}`, summary, now, now, author, normalizeForSearch(`${title} ${summary}`));
+      'INSERT INTO articles (cluster_id, version_id, source, title, url, summary, published_at, fetched_at, search_text) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+    ).run(cid, vid, source, title, `https://example.com/${cid}`, summary, now, now, normalizeForSearch(`${title} ${summary}`));
     return cid;
   };
-  ids.leak = mk('情報漏えいが判明 個人情報が流出', '政治', 100, { author: '山田太郎' });
+  ids.leak = mk('情報漏えいが判明 個人情報が流出', '政治', 100);
   ids.marathon = mk('大分国際車いすマラソン 日本新記録', 'スポーツ', 100);
   ids.local = mk('市議会で一般質問が行われる', '政治', 10);
   db.prepare('INSERT INTO editorials (cluster_id, paper, found, title, summary, url, checked_at) VALUES (?, ?, 1, ?, ?, ?, ?)')
@@ -87,7 +87,6 @@ test('各タブで total と返却行数が整合する', async () => {
     ['editorials', 'tab=editorials&limit=100', 1],
     ['bookmarks', 'tab=bookmarks&limit=100', 1],
     ['watch', `tab=watch&keywords=${encodeURIComponent('情報漏えい')}&limit=100`, 1],
-    ['reporter', `tab=reporter&source=${encodeURIComponent('朝日')}&author=${encodeURIComponent('山田太郎')}&limit=100`, 1],
   ];
   for (const [name, query, expected] of cases) {
     const data = await stories(query);

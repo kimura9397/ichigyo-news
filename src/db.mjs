@@ -29,16 +29,7 @@ CREATE TABLE IF NOT EXISTS articles (
   url TEXT NOT NULL UNIQUE,
   summary TEXT NOT NULL DEFAULT '',
   published_at TEXT,
-  fetched_at TEXT NOT NULL,
-  body_text TEXT NOT NULL DEFAULT '',
-  body_fetched_at TEXT,
-  author TEXT NOT NULL DEFAULT '',
-  resolved_url TEXT NOT NULL DEFAULT '',
-  body_url TEXT NOT NULL DEFAULT '',
-  body_via TEXT NOT NULL DEFAULT '',
-  image_url TEXT NOT NULL DEFAULT '',
-  image_via TEXT NOT NULL DEFAULT '',
-  image_fetched_at TEXT
+  fetched_at TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS editorials (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -104,24 +95,13 @@ export function openDb(path) {
   db.exec(SCHEMA);
   db.exec('CREATE INDEX IF NOT EXISTS idx_articles_version ON articles(version_id)');
   db.exec('CREATE INDEX IF NOT EXISTS idx_articles_cluster ON articles(cluster_id)');
-  ensureColumn(db, 'articles', 'body_text', "TEXT NOT NULL DEFAULT ''");
-  ensureColumn(db, 'articles', 'body_fetched_at', 'TEXT');
-  // 記者署名（バイライン）。本文取得時に抽出して保存する。取れなければ空（2026-11-15追加）
-  ensureColumn(db, 'articles', 'author', "TEXT NOT NULL DEFAULT ''");
   // キーワード検索/ウォッチの照合用シャドウカラム（src/normalize.mjs で正規化したテキスト）
   ensureColumn(db, 'articles', 'search_text', "TEXT NOT NULL DEFAULT ''");
-  // 本文から抽出した「要点」（src/extract.mjs、ルールベース抽出）。本文が無い記事は空
-  ensureColumn(db, 'articles', 'extract_text', "TEXT NOT NULL DEFAULT ''");
   ensureColumn(db, 'clusters', 'title_norm', "TEXT NOT NULL DEFAULT ''");
-  // GoogleニュースのラッパーURLから解決した実URLのキャッシュ
-  ensureColumn(db, 'articles', 'resolved_url', "TEXT NOT NULL DEFAULT ''");
-  // 本文を実際に取得したURLと経路（direct / resolved / yahoo）。出所の帰属表示に使う
-  ensureColumn(db, 'articles', 'body_url', "TEXT NOT NULL DEFAULT ''");
-  ensureColumn(db, 'articles', 'body_via', "TEXT NOT NULL DEFAULT ''");
-  // サムネイル画像のURL（画像自体は保存せず参照表示のみ）と取得元（rss / og）、og:image の取得試行時刻
-  ensureColumn(db, 'articles', 'image_url', "TEXT NOT NULL DEFAULT ''");
-  ensureColumn(db, 'articles', 'image_via', "TEXT NOT NULL DEFAULT ''");
-  ensureColumn(db, 'articles', 'image_fetched_at', 'TEXT');
   ensureColumn(db, 'fetch_runs', 'pruned_clusters', 'INTEGER NOT NULL DEFAULT 0');
+  // 本文機能の廃止（2026-11-16）に伴い、本文・画像・記者名まわりのカラム
+  // （body_text / body_fetched_at / author / resolved_url / body_url / body_via /
+  // image_url / image_via / image_fetched_at / extract_text）は新規DBには作らない。
+  // 既存DBに残っているカラムとその中身は lifecycle の purgeBodyData が消去する。
   return db;
 }

@@ -331,57 +331,6 @@
   line-height: 1.35;
 }
 
-/* 詳細ヘッダーの写真（一覧サムネイルと同じ代表画像）。見出しブロックの下に
-   通常フローで置き、本文テキストの表示幅は狭めない（float の回り込みはしない）。 */
-.detail-photo {
-  display: block;
-  width: 100%;
-  max-height: 280px;
-  object-fit: cover;
-  border-radius: 6px;
-  margin-top: 10px;
-  background: color-mix(in srgb, var(--line) 45%, var(--tint-base));
-  cursor: zoom-in;
-}
-
-/* 写真の拡大表示（ライトボックス）。詳細の代表画像をクリックすると開く。
-   背景は全テーマで馴染む固定の暗色半透明（--ink はダーク系プリセットでは
-   明色になるため使わない）。拡大画像はビューポートの90%以内に収め、
-   元の画像が小さい場合は引き伸ばさない（max-* のみで制限する）。 */
-.photo-lightbox {
-  position: fixed;
-  inset: 0;
-  z-index: 80;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: rgba(24, 19, 12, 0.9);
-  cursor: zoom-out;
-}
-
-.photo-lightbox-img {
-  max-width: 90vw;
-  max-height: 90vh;
-  object-fit: contain;
-  border-radius: 4px;
-}
-
-.photo-lightbox-close {
-  position: absolute;
-  top: 14px;
-  right: 14px;
-  appearance: none;
-  width: 40px;
-  height: 40px;
-  border-radius: 999px;
-  border: 1px solid rgba(244, 238, 227, 0.55);
-  background: rgba(24, 19, 12, 0.55);
-  color: #f4eee3;
-  font-size: 20px;
-  line-height: 1;
-  cursor: pointer;
-}
-
 /* ブックマークのトグルは見出しの末尾に置くアイコンボタン（独立した行は
    占めない）。状態はアイコンの塗り（未済みは輪郭のみ、済みは塗り＋反転地）
    で判別する。タブ行のブックマークボタンと同じグリフを使う */
@@ -889,60 +838,6 @@
   color: var(--vermillion);
 }
 
-/* 記者署名（バイライン）: 詳細の各紙見出しの下に出す */
-.paper-byline {
-  margin: -6px 0 12px;
-  font-size: 12px;
-  color: var(--muted);
-}
-
-.byline-link {
-  margin-left: 8px;
-  padding: 0;
-  border: none;
-  background: none;
-  font: inherit;
-  font-size: 12px;
-  font-weight: 650;
-  color: var(--vermillion);
-  cursor: pointer;
-}
-
-.byline-link:hover {
-  text-decoration: underline;
-}
-
-/* 記者ビュー（一覧上部のバナー） */
-.reporter-bar {
-  display: flex;
-  gap: 10px;
-  align-items: center;
-  flex-wrap: wrap;
-  padding: 10px 16px;
-  border-bottom: 1px solid var(--line);
-}
-
-.reporter-label {
-  font-size: 13px;
-  font-weight: 650;
-  color: var(--ink);
-}
-
-.reporter-close {
-  padding: 4px 12px;
-  border: 1px solid var(--line);
-  border-radius: 999px;
-  background: var(--paper);
-  color: var(--muted);
-  font: inherit;
-  font-size: 12px;
-  cursor: pointer;
-}
-
-.reporter-close:hover {
-  color: var(--ink);
-}
-
 .paper-note {
   margin: 12px 0 0;
   font-size: 12px;
@@ -1075,42 +970,6 @@
   font-size: 12px;
   color: var(--fresh);
   font-weight: 650;
-}
-
-.body-badge {
-  margin-left: 6px;
-  padding: 0 5px;
-  border: 1px solid var(--fresh);
-  border-radius: 999px;
-  font-size: 10px;
-  font-weight: 700;
-  color: var(--fresh);
-  vertical-align: 1px;
-}
-
-.outlet.is-active .body-badge {
-  border-color: var(--paper);
-  color: var(--paper);
-}
-
-/* --- 一覧のサムネイル（画像がある行だけ左に小さく表示） --- */
-/* 画像は float で左に置き、テキストを回り込ませる。画像の高さを超えた分は
-   行の全幅に戻る。flex の固定列だと画像なしの行よりテキスト幅が最後まで
-   狭いままになるため（2026-11-16 ユーザー実機フィードバック）。
-   .row は flow-root で float を行内に収める。 */
-
-.row {
-  display: flow-root;
-}
-
-.row-thumb {
-  float: left;
-  width: 88px;
-  height: 66px;
-  object-fit: cover;
-  border-radius: 4px;
-  margin: 2px 12px 8px 0;
-  background: color-mix(in srgb, var(--line) 45%, var(--tint-base));
 }
 
 /* --- 設定メニュー（ハンバーガー）と既読の薄表示 --- */

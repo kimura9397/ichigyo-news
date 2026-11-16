@@ -23,9 +23,6 @@ interface RawStoryRow {
   latest_published: string | null
   sources: string | null
   lead: string | null
-  body_count: number | null
-  body_chars: number | null
-  image_url: string | null
   /** 社説が確認できた媒体名（カンマ区切り、紙の並び順）。無ければ null */
   editorial_papers?: string | null
 }
@@ -34,22 +31,8 @@ interface RawArticle {
   source: string
   title: string
   url: string
-  /** GoogleニュースのラッパーURLから解決した実URL（あれば「元記事を読む」はこちらを優先） */
-  resolved_url?: string
   summary: string
-  /** 本文から抽出した「要点」（サーバー側ルールベース抽出。本文が取れた記事のみ） */
-  extract_text?: string
   published_at: string | null
-  body_text?: string
-  body_fetched_at?: string | null
-  /** 本文を実際に取得したURL */
-  body_url?: string
-  /** 本文の取得経路: direct / resolved / yahoo（yahoo は同一記事のYahoo!ニュース掲載版から取得） */
-  body_via?: string
-  /** サムネイル画像URL（RSS由来または og:image。参照表示のみ） */
-  image_url?: string
-  /** 記者署名（バイライン）。本文取得時に抽出できた場合のみ入る */
-  author?: string
 }
 
 interface RawVersion {
@@ -109,8 +92,6 @@ export interface ClusterDetail {
   rows: StoryRow[]
   /** 詳細取得時点で既に社説チェック済みだったか */
   editorialsChecked: boolean
-  /** 全記事について本文取得を試行済みか（未試行が残っていれば POST /api/body が要る） */
-  bodiesAttempted: boolean
 }
 
 /* ---------- URLの安全化 ---------- */
@@ -246,7 +227,6 @@ function editorialOnlyCoverage(info: EditorialInfo): OutletCoverage {
     outletName: info.outletName,
     headline: info.title,
     publishedAt: '',
-    report: '',
     summary: '',
     url: '',
     editorial: info.text,
@@ -260,15 +240,7 @@ function buildCoverages(
   editorials: EditorialInfo[],
 ): OutletCoverage[] {
   const order: string[] = []
-  const grouped = new Map<
-    string,
-    {
-      base: OutletCoverage
-      reports: string[]
-      bodies: string[]
-      bylines: { name: string; source: string }[]
-    }
-  >()
+  const grouped = new Map<string, { base: OutletCoverage; summaries: string[] }>()
   const counts = new Map<string, number>()
   for (const a of articles) {
     const o = outletOf(a.source)
@@ -285,54 +257,27 @@ function buildCoverages(
           outletName: o.name,
           headline: cleanText(a.title),
           publishedAt: a.published_at ?? '',
-          report: '',
-          // 要点（本文からの抽出）があればそちらを、無ければ従来の要約抜粋を表示する
-          summary: cleanText(a.extract_text ?? '') || summarize(a.summary),
-          // ラッパーURLが解決できていれば実URLを「元記事を読む」のリンクにする
-          url: safeUrl(a.resolved_url || a.url),
+          summary: summarize(a.summary),
+          url: safeUrl(a.url),
         },
-        reports: [],
-        bodies: [],
-        bylines: [],
+        summaries: [],
       })
     }
     const g = grouped.get(o.id)!
-    // 記者署名: 取れた記事分だけ、名前＋媒体（DB上の source）の組で集める（重複は除く）
-    const author = (a.author ?? '').trim()
-    if (
-      author &&
-      !g.bylines.some((b) => b.name === author && b.source === a.source)
-    ) {
-      g.bylines.push({ name: author, source: a.source })
-    }
-    // 同じ媒体の後続記事でラッパーURLの解決ができていれば、リンクはそちらを優先する
-    if ((g.base.url ?? '').includes('news.google.com') && a.resolved_url) {
-      g.base.url = safeUrl(a.resolved_url)
-    }
     // 同一媒体が同じ版に複数記事を持つ場合は見出し付きで連結する
-    g.reports.push(
+    g.summaries.push(
       (counts.get(o.id) ?? 0) > 1 ? `${cleanText(a.title)}\n${full}` : full,
     )
-    const body = (a.body_text ?? '').trim()
-    if (body) {
-      // Yahoo!ニュース掲載版から取得した本文は、出所を取り違えないよう注記を付けて連結する
-      g.bodies.push(
-        a.body_via === 'yahoo'
-          ? `（本文はYahoo!ニュース掲載の同一記事から取得）\n${body}`
-          : body,
-      )
-    }
   }
   const byOutlet = new Map(editorials.map((e) => [e.outletId, e]))
   const coverages = order.map((id) => {
     const g = grouped.get(id)!
-    const coverage: OutletCoverage = {
-      ...g.base,
-      report: g.reports.filter(Boolean).join('\n\n'),
+    const coverage: OutletCoverage = { ...g.base }
+    // 複数記事がある媒体は、要点にも全文（連結した要約）を使う
+    if ((counts.get(id) ?? 0) > 1) {
+      const joined = g.summaries.filter(Boolean).join('\n\n')
+      if (joined) coverage.summary = joined
     }
-    const body = g.bodies.filter(Boolean).join('\n\n')
-    if (body) coverage.body = body
-    if (g.bylines.length > 0) coverage.bylines = g.bylines
     const ed = byOutlet.get(id)
     if (ed) {
       coverage.editorial = ed.text
@@ -345,15 +290,7 @@ function buildCoverages(
   for (const ed of editorials) {
     if (!grouped.has(ed.outletId)) coverages.push(editorialOnlyCoverage(ed))
   }
-  // 本文が取れた紙を前に、本文の文字数が多い順に並べる（情報量の勾配）。
-  // 本文なし同士・社説のみの紙は元の並びを保つ（安定ソート）。
   return coverages
-    .map((c, i) => ({ c, i }))
-    .sort(
-      (a, b) =>
-        (b.c.body?.length ?? 0) - (a.c.body?.length ?? 0) || a.i - b.i,
-    )
-    .map(({ c }) => c)
 }
 
 /** 社説（後からPOSTで取得した分）を既存の行へ流し込む。 */
@@ -392,7 +329,6 @@ export function rowFromListItem(item: RawStoryRow): StoryRow {
       outletName: o.name,
       headline: '',
       publishedAt: item.latest_published ?? item.version_created_at,
-      report: '',
       summary: '',
     })
   }
@@ -411,24 +347,11 @@ export function rowFromListItem(item: RawStoryRow): StoryRow {
     isNew: isWithinNewWindow(item.version_created_at),
     bookmarked: !!item.bookmarked,
     read: !!item.read_flag,
-    imageUrl: safeUrl(item.image_url) || undefined,
-    bodyCount: item.body_count ?? 0,
-    bodyChars: item.body_chars ?? 0,
     editorialPapers: item.editorial_papers
       ? item.editorial_papers.split(',').filter(Boolean)
       : undefined,
     coverages,
   }
-}
-
-/** 版内の記事から代表サムネイルを選ぶ（直接URLの記事を優先する）。 */
-function representativeImage(articles: RawArticle[]): string | undefined {
-  const withImage = articles.filter((a) => a.image_url)
-  if (withImage.length === 0) return undefined
-  const direct = withImage.find(
-    (a) => !(a.url ?? '').includes('news.google.com'),
-  )
-  return safeUrl((direct ?? withImage[0]).image_url) || undefined
 }
 
 function detailFromRaw(data: RawStoryDetail): ClusterDetail {
@@ -438,11 +361,9 @@ function detailFromRaw(data: RawStoryDetail): ClusterDetail {
   const rows = data.versions.map((v) =>
     rowFromDetailVersion(data.cluster, v, editorials),
   )
-  const allArticles = data.versions.flatMap((v) => v.articles)
   return {
     rows,
     editorialsChecked: (data.editorials ?? []).length > 0,
-    bodiesAttempted: allArticles.every((a) => a.body_fetched_at != null),
   }
 }
 
@@ -456,10 +377,7 @@ function rowFromDetailVersion(
     .map((a) => a.published_at)
     .filter((p): p is string => Boolean(p))
     .sort()
-  const firstSummary =
-    version.articles.find((a) => cleanText(a.extract_text ?? '')) ??
-    version.articles.find((a) => cleanText(a.summary))
-  const withBody = version.articles.filter((a) => (a.body_text ?? '').trim())
+  const firstSummary = version.articles.find((a) => cleanText(a.summary))
   return {
     id: rowId(cluster.id, version.id),
     eventId: `c${cluster.id}`,
@@ -468,17 +386,12 @@ function rowFromDetailVersion(
     version: version.version_no,
     versionCreatedAt: version.created_at,
     title: version.title,
-    lead: firstSummary
-      ? summarize(cleanText(firstSummary.extract_text ?? '') || firstSummary.summary, 120)
-      : '',
+    lead: firstSummary ? summarize(firstSummary.summary, 120) : '',
     publishedAt: published[published.length - 1] ?? version.created_at,
     category: cluster.category ?? '',
     isImportant: cluster.importance_score >= IMPORTANT_THRESHOLD,
     isNew: isWithinNewWindow(version.created_at),
     bookmarked: !!cluster.bookmarked,
-    imageUrl: representativeImage(version.articles),
-    bodyCount: withBody.length,
-    bodyChars: withBody.reduce((n, a) => n + (a.body_text ?? '').length, 0),
     coverages,
     detailLoaded: true,
   }
@@ -501,8 +414,7 @@ async function fetchJson<T>(url: string, init?: RequestInit): Promise<T> {
 
 /** タブ＋カテゴリ別の一覧を1ページ分取得する。UIの 'fresh' は API の 'new' に対応。
  *  mutedCategories は重要タブでのみサーバーへ渡す（他タブではサーバー側でも無視される）。
- *  watchKeywords は tab=watch のときだけ渡す（サーバー側で OR の部分一致になる）。
- *  reporter は tab=reporter のときだけ渡す（媒体＋記者名でサーバー側が絞り込む）。 */
+ *  watchKeywords は tab=watch のときだけ渡す（サーバー側で OR の部分一致になる）。 */
 export async function fetchTabRows(
   tab: FeedTab,
   category: string,
@@ -510,7 +422,6 @@ export async function fetchTabRows(
   limit = 100,
   mutedCategories: string[] = [],
   watchKeywords: string[] = [],
-  reporter: { source: string; author: string } | null = null,
 ): Promise<StoriesPage> {
   // UIの 'search' はサーバー側では tab=watch（キーワード部分一致）として扱う
   const apiTab = tab === 'fresh' ? 'new' : tab === 'search' ? 'watch' : tab
@@ -525,10 +436,6 @@ export async function fetchTabRows(
   }
   if (apiTab === 'watch' && watchKeywords.length > 0) {
     params.set('keywords', watchKeywords.join(','))
-  }
-  if (apiTab === 'reporter' && reporter) {
-    params.set('source', reporter.source)
-    params.set('author', reporter.author)
   }
   const data = await fetchJson<{
     stories: RawStoryRow[]
@@ -563,17 +470,6 @@ export async function fetchEditorials(
   return (data.editorials ?? [])
     .map(editorialInfo)
     .filter((e): e is EditorialInfo => e !== null)
-}
-
-/** 本文取得を依頼し、更新後の詳細を返す。 */
-export async function fetchClusterBodies(
-  clusterId: number,
-): Promise<ClusterDetail> {
-  const data = await fetchJson<{ story: RawStoryDetail }>(
-    `/api/body/${clusterId}`,
-    { method: 'POST' },
-  )
-  return detailFromRaw(data.story)
 }
 
 /** ニュースの再取得を依頼する。 */

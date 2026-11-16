@@ -53,7 +53,6 @@ function coverage(outletId, outletName) {
     outletName,
     headline: `${outletName}の見出し`,
     publishedAt: '2026-11-15T00:00:00.000Z',
-    report: '',
     summary: '',
   };
 }
@@ -130,9 +129,6 @@ test('rowFromListItem: 既読フラグ・重要度閾値・社説紙・媒体の
     latest_published: '2026-11-15T00:30:00.000Z',
     sources: '朝日,Google,Google',
     lead: 'リード',
-    body_count: 1,
-    body_chars: 500,
-    image_url: null,
     editorial_papers: '朝日新聞,読売新聞',
     read_flag: 1,
     bookmarked: 0,

@@ -13,13 +13,11 @@ import {
   addBookmark,
   addKeywordRemote,
   applyEditorials,
-  fetchClusterBodies,
   fetchClusterDetail,
   fetchDbStatus,
   fetchEditorials,
   fetchKeywords,
   fetchTabRows,
-  outletOf,
   postReadEvent,
   refreshFeed,
   removeBookmark,
@@ -54,7 +52,7 @@ const PANE_RATIO_MAX = 0.65
 // 狭幅では一覧と詳細を横に並べた全画面ページャーになる（2026-11-15 ユーザー決定）
 const NARROW_MEDIA = '(max-width: 860px)'
 
-/** 本文テキストを段落ごとに <p> で描く（改行を行・段落の区切りとして扱う）。 */
+/** 要約・社説のテキストを段落ごとに <p> で描く（改行を行・段落の区切りとして扱う）。 */
 function Paragraphs({ text }: { text: string }) {
   const paras = text
     .split(/\n+/)
@@ -97,7 +95,6 @@ function formatWhen(iso: string) {
 
 type DetailState = 'loading' | 'loaded'
 type EditorialState = 'unchecked' | 'loading' | 'done'
-type BodyState = 'loading' | 'done'
 type FontSizeSetting = 'small' | 'medium' | 'large'
 /** 一覧の密度（2026-11-16 ユーザー決定、Issue #4）。コンパクトは行の構造を詰めて
  * 1画面に入る行数を増やす（モニター用途）。フォントサイズは変えない */
@@ -167,7 +164,6 @@ function App() {
   const [editorialState, setEditorialState] = useState<
     Record<number, EditorialState>
   >({})
-  const [bodyState, setBodyState] = useState<Record<number, BodyState>>({})
   const [refreshing, setRefreshing] = useState(false)
   const [bgRefreshing, setBgRefreshing] = useState(false)
   const [dbBytes, setDbBytes] = useState<number | null>(null)
@@ -279,13 +275,6 @@ function App() {
       return true
     }
   })
-  const [showThumbs, setShowThumbs] = useState<boolean>(() => {
-    try {
-      return localStorage.getItem('ichigyo:showThumbs') !== '0'
-    } catch {
-      return true
-    }
-  })
   const [mutedCategories, setMutedCategories] = useState<string[]>(() => {
     try {
       const v: unknown = JSON.parse(
@@ -303,8 +292,6 @@ function App() {
   })
   const [menuOpen, setMenuOpen] = useState(false)
   const menuRef = useRef<HTMLDivElement | null>(null)
-  /** 拡大表示（ライトボックス）中の写真の URL。null のときは閉じている */
-  const [zoomedPhoto, setZoomedPhoto] = useState<string | null>(null)
   /** このセッションで詳細を開いたクラスタ（サーバーの read_flag と合わせて薄表示に使う） */
   const [readClusters, setReadClusters] = useState<ReadonlySet<number>>(
     new Set(),
@@ -366,14 +353,6 @@ function App() {
   }, [dimRead])
 
   useEffect(() => {
-    try {
-      localStorage.setItem('ichigyo:showThumbs', showThumbs ? '1' : '0')
-    } catch {
-      /* 同上 */
-    }
-  }, [showThumbs])
-
-  useEffect(() => {
     mutedRef.current = mutedCategories
     try {
       localStorage.setItem(
@@ -403,26 +382,6 @@ function App() {
       document.removeEventListener('keydown', onKeyDown)
     }
   }, [menuOpen])
-
-  // 写真の拡大表示（ライトボックス）は Esc で閉じる。開いている間は背面のスクロールを止める
-  useEffect(() => {
-    if (!zoomedPhoto) return
-    const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setZoomedPhoto(null)
-    }
-    document.addEventListener('keydown', onKeyDown)
-    const prevOverflow = document.body.style.overflow
-    document.body.style.overflow = 'hidden'
-    return () => {
-      document.removeEventListener('keydown', onKeyDown)
-      document.body.style.overflow = prevOverflow
-    }
-  }, [zoomedPhoto])
-
-  // 別のニュースを開いたら拡大表示は閉じる
-  useEffect(() => {
-    setZoomedPhoto(null)
-  }, [selectedId])
 
   // キーワードウォッチ（2026-11-15 ユーザー決定）。キーワードはサーバー側（DB）に保存する
   // （照合条件であると同時に、更新時の収集クエリでもあるため）。
@@ -567,34 +526,6 @@ function App() {
     }
   }
 
-  // 記者ビュー（2026-11-15 ユーザー希望）: 詳細の署名から「同じ媒体＋同じ記者の他の記事」を開く。
-  // 同姓同名の別人を混ぜないため、絞り込みは媒体（DB上の source）＋記者名の組で行う。
-  // 記者の傾向の自動判定はしない（記事を並べて判断するのは利用者自身）。
-  const [reporterSel, setReporterSel] = useState<{
-    source: string
-    name: string
-  } | null>(null)
-  const reporterRef = useRef<{ source: string; name: string } | null>(null)
-
-  useEffect(() => {
-    reporterRef.current = reporterSel
-  }, [reporterSel])
-
-  function openReporter(source: string, name: string) {
-    acknowledgeNew()
-    setReporterSel({ source, name })
-    setTab('reporter')
-    setSelectedId(null)
-    setOutletId(null)
-    setCoverageKind('summary')
-    goToListPane()
-  }
-
-  function closeReporter() {
-    setReporterSel(null)
-    switchTab('important')
-  }
-
   /** 重要タブのカテゴリミュート切替。条件が変わるので重要タブのキャッシュは捨てる。 */
   function toggleMuteCategory(cat: string) {
     setMutedCategories((prev) =>
@@ -694,9 +625,7 @@ function App() {
       ? (watchKeyword ?? '__all__')
       : tab === 'search'
         ? `q:${searchQuery}`
-        : tab === 'reporter' && reporterSel
-          ? `r:${reporterSel.source}|${reporterSel.name}`
-          : '',
+        : '',
   )
   const page = pages[key] ?? null
 
@@ -707,9 +636,7 @@ function App() {
           ? (watchKeywordRef.current ?? '__all__')
           : target === 'search'
             ? `q:${searchQueryRef.current}`
-            : target === 'reporter' && reporterRef.current
-              ? `r:${reporterRef.current.source}|${reporterRef.current.name}`
-              : ''
+            : ''
       const watchKeywords =
         target === 'watch'
           ? watchKeywordRef.current
@@ -728,29 +655,12 @@ function App() {
           100,
           mutedRef.current,
           watchKeywords,
-          target === 'reporter'
-            ? reporterRef.current
-              ? {
-                  source: reporterRef.current.source,
-                  author: reporterRef.current.name,
-                }
-              : null
-            : null,
         )
         setRows((prev) => {
           const next = { ...prev }
           for (const row of result.rows) {
             // 詳細取得済みの行は coverages を保持する
             if (!next[row.id]?.detailLoaded) next[row.id] = row
-            else if ((row.bodyCount ?? 0) > 0 || row.imageUrl) {
-              // 一覧側の本文バッジとサムネイルだけは新しい情報で更新する
-              next[row.id] = {
-                ...next[row.id],
-                bodyCount: row.bodyCount,
-                bodyChars: row.bodyChars,
-                imageUrl: row.imageUrl ?? next[row.id].imageUrl,
-              }
-            }
           }
           return next
         })
@@ -966,9 +876,6 @@ function App() {
           ...prev,
           [cid]: detail.editorialsChecked ? 'done' : 'unchecked',
         }))
-        if (detail.bodiesAttempted) {
-          setBodyState((prev) => ({ ...prev, [cid]: 'done' }))
-        }
       })
       .catch(() => {
         setDetailState((prev) => ({ ...prev, [cid]: 'loaded' }))
@@ -999,71 +906,17 @@ function App() {
       })
   }, [selectedClusterId, selectedEditorialState])
 
-  // 本文が未試行のクラスタは、詳細を開いた時点で本文取得も試みる（社説と並行）
-  const selectedBodyState = selected ? bodyState[selected.clusterId] : undefined
-  useEffect(() => {
-    if (selectedClusterId === undefined) return
-    if (detailState[selectedClusterId] !== 'loaded') return
-    if (selectedBodyState !== undefined) return
-    const cid = selectedClusterId
-    setBodyState((prev) => ({ ...prev, [cid]: 'loading' }))
-    fetchClusterBodies(cid)
-      .then((detail) => {
-        setRows((prev) => {
-          const next = { ...prev }
-          for (const row of detail.rows) {
-            // 本文取得で coverages が並べ替わる。社説の取得結果は保持する
-            const old = next[row.id]
-            next[row.id] = old
-              ? {
-                  ...row,
-                  imageUrl: row.imageUrl ?? old.imageUrl,
-                  coverages: row.coverages.map((c) => {
-                    const oc = old.coverages.find(
-                      (x) => x.outletId === c.outletId,
-                    )
-                    return oc?.editorial && !c.editorial
-                      ? {
-                          ...c,
-                          editorial: oc.editorial,
-                          editorialTitle: oc.editorialTitle,
-                          editorialUrl: oc.editorialUrl,
-                        }
-                      : c
-                  }),
-                }
-              : row
-          }
-          return next
-        })
-        setBodyState((prev) => ({ ...prev, [cid]: 'done' }))
-      })
-      .catch(() => {
-        setBodyState((prev) => ({ ...prev, [cid]: 'done' }))
-      })
-  }, [selectedClusterId, detailState, selectedBodyState])
-
-  // 報道・社説の切替は「中身がある場合だけ」出す（空表示の廃止、2026-11-15 ユーザー要望）。
-  // 取得の試行前・試行中は切替を出したままにし、完了して初めて「無かった」と確定したら隠す。
-  const hasBodyCoverage = selected?.coverages.some((c) => c.body) ?? false
+  // 社説の切替は「中身がある場合だけ」出す（空表示の廃止、2026-11-15 ユーザー要望）。
+  // 確認の試行前・試行中は切替を出したままにし、完了して初めて「無かった」と確定したら隠す。
   const hasEditorialCoverage =
     selected?.coverages.some((c) => c.editorial) ?? false
-  const showReportTab = selectedBodyState !== 'done' || hasBodyCoverage
   const showEditorialTab =
     selectedEditorialState !== 'done' || hasEditorialCoverage
   const effectiveKind: CoverageKind =
-    (coverageKind === 'report' && !showReportTab) ||
-    (coverageKind === 'editorial' && !showEditorialTab)
-      ? 'summary'
-      : coverageKind
-  // 報道ビューでは本文が取れた媒体だけを出す。
+    coverageKind === 'editorial' && !showEditorialTab ? 'summary' : coverageKind
   // 社説ビューでは媒体を絞り込まない: 選択中の媒体に社説が無い場合は、別媒体の社説を
   // 無言で代替表示せず「その媒体の社説は無い」と明示する（帰属の誤解防止、2026-11-15 是正）。
-  const visibleCoverages = !selected
-    ? []
-    : effectiveKind === 'report'
-      ? selected.coverages.filter((c) => c.body)
-      : selected.coverages
+  const visibleCoverages = !selected ? [] : selected.coverages
   /** 社説が確認できている媒体（社説ビューでの案内文に使う） */
   const editorialOutlets =
     selected?.coverages.filter((c) => c.editorial) ?? []
@@ -1174,7 +1027,6 @@ function App() {
       setPages({})
       setDetailState({})
       setEditorialState({})
-      setBodyState({})
       setSelectedId(null)
       setOutletId(null)
       goToListPane()
@@ -1191,19 +1043,14 @@ function App() {
 
   const detailLoading = selected ? !selected.detailLoaded : false
   const editorialLoading = selectedEditorialState === 'loading'
-  const bodyLoading = selectedBodyState === 'loading'
-  // 要約は常時、報道・社説は中身がある（または取得試行中）場合だけ切替を出す
+  // 要点は常時、社説は中身がある（または確認中）場合だけ切替を出す
   const visibleKinds = (
     [
       ['summary', '要点'],
-      ['report', '報道'],
       ['editorial', '社説'],
     ] as const
   ).filter(
-    ([kind]) =>
-      kind === 'summary' ||
-      (kind === 'report' && showReportTab) ||
-      (kind === 'editorial' && showEditorialTab),
+    ([kind]) => kind === 'summary' || (kind === 'editorial' && showEditorialTab),
   )
   const hasMore = page !== null && page.ids.length < page.total
   const counts = catCounts[tab] ?? []
@@ -1406,21 +1253,6 @@ function App() {
                       </div>
                     </div>
                     <div className="menu-row">
-                      <span className="menu-label">サムネイル画像</span>
-                      <button
-                        type="button"
-                        className="switch"
-                        role="switch"
-                        aria-checked={showThumbs}
-                        onClick={() => setShowThumbs((v) => !v)}
-                        aria-label="一覧のサムネイル画像を表示する"
-                      >
-                        <span className="switch-track">
-                          <span className="switch-thumb" />
-                        </span>
-                      </button>
-                    </div>
-                    <div className="menu-row">
                       <span className="menu-label">
                         読んだニュースを薄く表示
                       </span>
@@ -1464,7 +1296,7 @@ function App() {
                   <section className="menu-section">
                     <h3>キーワードウォッチ</h3>
                     <p className="menu-note">
-                      登録したキーワードを含むニュースだけを、タブ行のキーワードボタンから見られます。一致は見出し・要点・取得済みの本文が対象で、表記ゆれ（漏洩／漏えい等）も吸収します。キーワードはサーバーに保存され、更新のたびにそのキーワードのニュースも自動で集めます。
+                      登録したキーワードを含むニュースだけを、タブ行のキーワードボタンから見られます。一致は見出しと要約が対象で、表記ゆれ（漏洩／漏えい等）も吸収します。キーワードはサーバーに保存され、更新のたびにそのキーワードのニュースも自動で集めます。
                     </p>
                     <form
                       className="kw-form"
@@ -1750,21 +1582,6 @@ function App() {
         </div>
       ) : null}
 
-      {tab === 'reporter' && reporterSel ? (
-        <div className="reporter-bar">
-          <span className="reporter-label">
-            {reporterSel.name}記者（{outletOf(reporterSel.source).name}）の記事
-          </span>
-          <button
-            type="button"
-            className="reporter-close"
-            onClick={closeReporter}
-          >
-            ✕ 閉じる
-          </button>
-        </div>
-      ) : null}
-
       {tab === 'watch' ? (
         <div className="watch-bar" role="tablist" aria-label="キーワード">
           <button
@@ -1813,10 +1630,8 @@ function App() {
           ) : visible.length === 0 ? (
             <p className="empty">
               {loadError ??
-                (tab === 'reporter' && reporterSel
-                  ? `${reporterSel.name}記者（${outletOf(reporterSel.source).name}）の記事はまだありません。`
-                  : tab === 'search' && !searchQuery
-                    ? '上の入力欄にキーワードを入れて検索してください。一致はクラスタと記事の見出し・要点・取得済みの本文が対象です。'
+                (tab === 'search' && !searchQuery
+                    ? '上の入力欄にキーワードを入れて検索してください。一致はクラスタと記事の見出し・要約が対象です。'
                     : tab === 'search'
                       ? `「${searchQuery}」に一致するニュースはありません。`
                       : tab === 'watch' && keywords.length === 0
@@ -1873,20 +1688,6 @@ function App() {
                         className={rowClass}
                         onClick={() => openStory(story.id)}
                       >
-                        {showThumbs && story.imageUrl ? (
-                          <img
-                            className="row-thumb"
-                            src={story.imageUrl}
-                            alt=""
-                            width={88}
-                            height={66}
-                            loading="lazy"
-                            referrerPolicy="no-referrer"
-                            onError={(e) => {
-                              e.currentTarget.style.display = 'none'
-                            }}
-                          />
-                        ) : null}
                         <div className="row-main">
                           <div className="row-meta">
                             <span className="version">v{story.version}</span>
@@ -2004,21 +1805,6 @@ function App() {
                 </time>
               </p>
               <p className="detail-lead">{selected.lead}</p>
-              {showThumbs && selected.imageUrl ? (
-                <img
-                  className="detail-photo"
-                  src={selected.imageUrl}
-                  alt=""
-                  loading="lazy"
-                  referrerPolicy="no-referrer"
-                  onClick={() => {
-                    if (selected.imageUrl) setZoomedPhoto(selected.imageUrl)
-                  }}
-                  onError={(e) => {
-                    e.currentTarget.style.display = 'none'
-                  }}
-                />
-              ) : null}
               <ol
                 className="version-rail"
                 aria-label="この出来事の版"
@@ -2063,9 +1849,6 @@ function App() {
                       onClick={() => setOutletId(coverage.outletId)}
                     >
                       {coverage.outletName}
-                      {coverage.body ? (
-                        <span className="body-badge">本文あり</span>
-                      ) : null}
                       {coverage.editorial ? (
                         <span className="editorial-badge">社説あり</span>
                       ) : null}
@@ -2103,26 +1886,6 @@ function App() {
                       </time>
                     </p>
                     <h3>{activeOutlet.headline}</h3>
-                    {effectiveKind !== 'editorial' &&
-                    activeOutlet.bylines &&
-                    activeOutlet.bylines.length > 0 ? (
-                      <p className="paper-byline">
-                        記者：
-                        {activeOutlet.bylines.map((b, i) => (
-                          <span key={`${b.source}|${b.name}`}>
-                            {i > 0 ? '、' : ''}
-                            {b.name}
-                            <button
-                              type="button"
-                              className="byline-link"
-                              onClick={() => openReporter(b.source, b.name)}
-                            >
-                              この記者の他の記事
-                            </button>
-                          </span>
-                        ))}
-                      </p>
-                    ) : null}
                     {effectiveKind === 'editorial' ? (
                       editorialLoading ? (
                         <p className="paper-note">社説を確認中…</p>
@@ -2156,20 +1919,6 @@ function App() {
                             : ''}
                         </p>
                       )
-                    ) : effectiveKind === 'report' ? (
-                      <>
-                        <Paragraphs text={activeOutlet.body ?? ''} />
-                        {activeOutlet.url ? (
-                          <a
-                            className="paper-link"
-                            href={activeOutlet.url}
-                            target="_blank"
-                            rel="noreferrer"
-                          >
-                            元記事を読む
-                          </a>
-                        ) : null}
-                      </>
                     ) : (
                       <>
                         <Paragraphs
@@ -2188,39 +1937,12 @@ function App() {
                       </>
                     )}
                   </div>
-                ) : effectiveKind === 'report' && bodyLoading ? (
-                  <p className="muted">本文を取得中…</p>
                 ) : effectiveKind === 'editorial' && editorialLoading ? (
                   <p className="muted">社説を確認中…</p>
                 ) : null}
               </>
             )}
           </article>
-        ) : null}
-
-        {zoomedPhoto ? (
-          <div
-            className="photo-lightbox"
-            role="dialog"
-            aria-modal="true"
-            aria-label="写真の拡大表示"
-            onClick={() => setZoomedPhoto(null)}
-          >
-            <img
-              className="photo-lightbox-img"
-              src={zoomedPhoto}
-              alt=""
-              referrerPolicy="no-referrer"
-            />
-            <button
-              type="button"
-              className="photo-lightbox-close"
-              aria-label="拡大表示を閉じる"
-              onClick={() => setZoomedPhoto(null)}
-            >
-              ×
-            </button>
-          </div>
         ) : null}
       </div>
     </div>

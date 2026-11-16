@@ -4,13 +4,11 @@
 // - 閲覧ログの生イベントは30日で read_daily（日次集計）へ畳んで削除し、集計は無期限保持する。
 // - VACUUM は起動時には行わず、refresh 時の prune 後に空きページ率が高い場合だけ自動実行する
 //   （手動実行は /api/maintenance から）。
-// - 保存済み本文には行単位のノイズ除去フィルタを後がけする（本文ノイズ除去、2026-11-15）。
-// - 本文が保存済みで未抽出の記事には、本文中の署名表記から記者名を後がけ抽出する（記者バイライン、2026-11-15）。
 // - 保存済みの社説（found=1）は現在の関連判定で再評価し、通らないものは found=0 に降格する（社説の誤マッチ対策、2026-11-15）。
-import { filterBodyLines, extractAuthorFromText, buildTitleClusterIndex, isOtherTitleLine } from './body.mjs';
+// - 本文機能の廃止（2026-11-16）に伴い、既存DBに残る本文・画像・記者名の保存データは
+//   purgeBodyData で消去する（サーバー起動時と refresh のライフサイクルで実行、冪等）。
 import { editorialRelated, importanceFor, bigrams, filterWeakBigrams, matchScore, jaccard, strongTerms, summaryWords, refineCategory, hasStoryAnchor } from './collector.mjs';
 import { normalizeForSearch, buildArticleSearchText } from './normalize.mjs';
-import { extractKeyPoints } from './extract.mjs';
 
 export const RETENTION_DAYS = 7;
 export const FETCH_RUNS_KEPT = 30;
@@ -114,55 +112,38 @@ export function vacuumIfNeeded(db) {
   return true;
 }
 
-/* ---------- 保存済み本文へのノイズ除去の後がけ ---------- */
+/* ---------- 本文機能廃止に伴う保存データの消去（移行処理） ---------- */
 
 /**
- * 保存済みの本文（articles.body_text）に、ノイズ除去フィルタを後がけする。
- * フィルタで内容が変わった記事だけを更新する。更新した記事数を返す。
- * タイトルも渡し、先頭のタイトル重複行や末尾の他記事見出しリストも落とす。
- * あわせて方式2（DBの他記事タイトルとの照合）も適用する: 本文の行が他クラスタ
- * 記事のタイトルそのものなら、単独で挟まった他記事見出し行として落とす。
- * タイトル索引は全記事から1回だけ作る（本文の保存件数は多くない前提）。
+ * 本文機能の廃止（2026-11-16）前に保存された、記事ページ取得由来のデータを消す。
+ * 対象は旧カラム群（body_text / body_fetched_at / author / resolved_url / body_url /
+ * body_via / image_url / image_via / image_fetched_at / extract_text）。
+ * 新規DBにはこれらのカラム自体が無いため、存在するカラムだけを対象にする。
+ * search_text は本文も含めて作られていたため、消去後にタイトル＋要約だけで
+ * 作り直す（refreshSearchText が差分を検出して更新する）。
+ * サーバー起動時と refresh のライフサイクルで呼び、2回目以降は何も変えない（冪等）。
+ * 中身を消した記事数を返す。
  */
-export function refilterBodies(db) {
-  const rows = db.prepare("SELECT id, cluster_id, title, body_text FROM articles WHERE body_text != ''").all();
-  if (!rows.length) return 0;
-  const titleIndex = buildTitleClusterIndex(db.prepare('SELECT cluster_id, title FROM articles').all());
-  const update = db.prepare('UPDATE articles SET body_text = ? WHERE id = ?');
-  let changed = 0;
-  db.exec('BEGIN IMMEDIATE');
-  try {
-    for (const r of rows) {
-      const cleaned = filterBodyLines(r.body_text, r.title, (line) => isOtherTitleLine(line, r.cluster_id, titleIndex));
-      if (cleaned !== r.body_text) { update.run(cleaned, r.id); changed++; }
-    }
-    db.exec('COMMIT');
-  } catch (e) { try { db.exec('ROLLBACK'); } catch {} throw e; }
-  return changed;
-}
+const PURGED_COLUMNS = [
+  ['body_text', "''"], ['body_fetched_at', 'NULL'], ['author', "''"],
+  ['resolved_url', "''"], ['body_url', "''"], ['body_via', "''"],
+  ['image_url', "''"], ['image_via', "''"], ['image_fetched_at', 'NULL'],
+  ['extract_text', "''"],
+];
 
-/* ---------- 保存済み本文への記者署名の後がけ ---------- */
-
-/**
- * 本文が保存済みで署名が未抽出の記事について、本文テキスト中の署名表記
- * （（○○記者）・文・○○ 等）から記者名を抽出して articles.author に入れる。
- * 取得HTMLは残っていないため、メタ情報（meta / JSON-LD）からの抽出はここではできない。
- * 抽出できた記事数を返す。
- */
-export function backfillAuthors(db) {
-  const rows = db.prepare("SELECT id, body_text FROM articles WHERE body_text != '' AND author = ''").all();
-  if (!rows.length) return 0;
-  const update = db.prepare('UPDATE articles SET author = ? WHERE id = ?');
-  let filled = 0;
-  db.exec('BEGIN IMMEDIATE');
-  try {
-    for (const r of rows) {
-      const name = extractAuthorFromText(r.body_text);
-      if (name) { update.run(name, r.id); filled++; }
-    }
-    db.exec('COMMIT');
-  } catch (e) { try { db.exec('ROLLBACK'); } catch {} throw e; }
-  return filled;
+export function purgeBodyData(db) {
+  const cols = new Set(db.prepare('PRAGMA table_info(articles)').all().map((c) => c.name));
+  const targets = PURGED_COLUMNS.filter(([name]) => cols.has(name));
+  if (!targets.length) return 0;
+  const nonempty = targets
+    .map(([name, empty]) => `${name} IS NOT ${empty === 'NULL' ? 'NULL' : empty}`)
+    .join(' OR ');
+  const count = db.prepare(`SELECT COUNT(*) AS c FROM articles WHERE ${nonempty}`).get().c;
+  if (!count) return 0;
+  const sets = targets.map(([name, empty]) => `${name} = ${empty}`).join(', ');
+  db.prepare(`UPDATE articles SET ${sets} WHERE ${nonempty}`).run();
+  refreshSearchText(db);
+  return count;
 }
 
 /* ---------- 過剰統合クラスタの分離 ---------- */
@@ -376,20 +357,15 @@ export function reevaluateEditorials(db) {
 }
 
 /**
- * refresh 時に行うライフサイクル一式: 閲覧集計 → prune → fetch_runs 整理 → 本文の後がけ → 署名の後がけ → 過剰統合の分離 → 社説の再評価 → 自動 VACUUM 判定。
- * 戻り値: { prunedClusters, foldedReads, refilteredBodies, backfilledAuthors, splitClusters, splitForeignVersions, reevaluatedEditorials, vacuumed }
- */
-/**
  * キーワード検索/ウォッチの照合用シャドウテキスト（articles.search_text / clusters.title_norm）を
- * 現在のタイトル・要約・本文から再計算する。本文の書き換え（ノイズ除去の再フィルタ等）や
- * 旧バージョンで作られた行を取りこぼさないよう、値が変わる行だけを更新する。
- * 更新した行数を返す。
+ * 現在のタイトル・要約から再計算する。旧バージョンで作られた行を取りこぼさないよう、
+ * 値が変わる行だけを更新する。更新した行数を返す。
  */
 export function refreshSearchText(db) {
   let updated = 0;
   const updArticle = db.prepare('UPDATE articles SET search_text = ? WHERE id = ?');
-  for (const a of db.prepare('SELECT id, title, summary, body_text, search_text FROM articles').all()) {
-    const next = buildArticleSearchText(a.title, a.summary, a.body_text);
+  for (const a of db.prepare('SELECT id, title, summary, search_text FROM articles').all()) {
+    const next = buildArticleSearchText(a.title, a.summary);
     if (next !== a.search_text) { updArticle.run(next, a.id); updated++; }
   }
   const updCluster = db.prepare('UPDATE clusters SET title_norm = ? WHERE id = ?');
@@ -427,35 +403,20 @@ export function recomputeAllImportance(db, now = new Date()) {
 }
 
 /**
- * 本文が取れている記事の「要点」（articles.extract_text）を現在の本文から再計算する。
- * 本文の後がけ取得やノイズ除去の再フィルタで本文が変わっても、要点が追随するようにする。
- * 値が変わった行数を返す。
+ * refresh 時に行うライフサイクル一式: 閲覧集計 → prune → fetch_runs 整理 →
+ * 本文データの消去（移行） → 過剰統合の分離 → 社説の再評価 → 自動 VACUUM 判定。
+ * 戻り値: { prunedClusters, foldedReads, purgedBodyData, splitClusters, splitForeignVersions, reevaluatedEditorials, vacuumed }
  */
-export function refreshExtracts(db) {
-  const update = db.prepare('UPDATE articles SET extract_text = ? WHERE id = ?');
-  let changed = 0;
-  for (const a of db.prepare("SELECT id, title, body_text, extract_text FROM articles WHERE body_text != ''").all()) {
-    const next = extractKeyPoints(a.title, a.body_text);
-    if (next !== a.extract_text) {
-      update.run(next, a.id);
-      changed++;
-    }
-  }
-  return changed;
-}
-
 export function runLifecycle(db, now = new Date()) {
   const foldedReads = foldOldReadEvents(db, now);
   const prunedClusters = pruneOldClusters(db, now);
   pruneFetchRuns(db);
-  const refilteredBodies = refilterBodies(db);
-  const backfilledAuthors = backfillAuthors(db);
+  const purgedBodyData = purgeBodyData(db);
   const splitClusters = splitOverMergedClusters(db);
   const splitForeign = splitForeignVersions(db);
   const refreshedSearchText = refreshSearchText(db);
-  const refreshedExtracts = refreshExtracts(db);
   const reevaluatedEditorials = reevaluateEditorials(db);
   const recomputedImportance = recomputeAllImportance(db, now);
   const vacuumed = vacuumIfNeeded(db);
-  return { prunedClusters, foldedReads, refilteredBodies, backfilledAuthors, splitClusters, splitForeignVersions: splitForeign, refreshedSearchText, refreshedExtracts, reevaluatedEditorials, recomputedImportance, vacuumed };
+  return { prunedClusters, foldedReads, purgedBodyData, splitClusters, splitForeignVersions: splitForeign, refreshedSearchText, reevaluatedEditorials, recomputedImportance, vacuumed };
 }

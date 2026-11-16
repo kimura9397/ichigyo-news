@@ -48,7 +48,7 @@ source: '',
 category: '',
 url: `https://news.google.com/rss/search?q=${encodeURIComponent(`site:${domain}`)}&hl=ja&gl=JP&ceid=JP:ja`,
 })),
-// 公式RSSで記事ページへの直接URLが返るもの（ラッパーURLを経由しないため本文取得の材料になる）。
+// 公式RSSで記事ページへの直接URLが返るもの（ラッパーURLを経由しないため、「元記事を読む」のリンクが媒体のページへ直接届く）。
 // 2026-11-15 実測でアイテムが返ることを確認したものだけを採用している。
 // （毎日・47newsの公式RSSはこの環境では403で取得できず未採用。読売・日経・産経は公開RSSのURLを確認できず未採用）
 { name: '朝日 見出し', source: '朝日', category: '', url: 'https://www.asahi.com/rss/asahi/newsheadlines.rdf' },
@@ -58,23 +58,14 @@ url: `https://news.google.com/rss/search?q=${encodeURIComponent(`site:${domain}`
 ];
 
 /**
- * 中継（ラッパー）URLか。本文取得では実ページに辿り着けないため、直接URLと区別する。
+ * 中継（ラッパー）URLか。同一記事が直接URLでも届いた場合は、「元記事を読む」の
+ * リンク先として直接URL側を残すために区別する。
  * 現状のラッパーは Googleニュース（news.google.com の記事URL）のみ。
  */
 export function isWrapperUrl(rawUrl) {
   try {
     const u = new URL(rawUrl);
     return u.hostname === 'news.google.com' && /^\/(rss\/)?articles\//.test(u.pathname);
-  } catch {
-    return false;
-  }
-}
-
-/** Yahoo!ニュースの記事ページ（/articles/）か。配信記事の本文がYahoo側に掲載されていることが多い。 */
-export function isYahooArticleUrl(rawUrl) {
-  try {
-    const u = new URL(rawUrl);
-    return u.hostname === 'news.yahoo.co.jp' && u.pathname.startsWith('/articles/');
   } catch {
     return false;
   }
@@ -113,45 +104,6 @@ return (lastSentence > maxLen * 0.5? cut.slice(0, lastSentence + 1): cut) + (las
 
 // ---------- RSSパース（正規表現ベース） ----------
 
-/**
- * アイテムブロックからサムネイル画像のURLを取り出す（段階1: RSSに画像があれば拾う）。
- * media:thumbnail / media:content（image のもの）/ enclosure（image/*）/ description 内の <img> の順に探す。
- * http/https のURLだけを採用する。画像そのものは保存せず、URLの参照表示のみ。
- * 現在の主要フィードは記事ごとの画像をほぼ含まないため、通常は '' になる（壊れないこと優先）。
- */
-export function extractFeedImage(block, descriptionHtml = '') {
-const candidates = [];
-for (const m of String(block).matchAll(/<media:(thumbnail|content)\b[^>]*>/gi)) {
-const tag = m[0];
-const url = (tag.match(/\burl="([^"]+)"/i) || [])[1];
-if (!url) continue;
-if (m[1].toLowerCase() === 'content') {
-const type = (tag.match(/\btype="([^"]+)"/i) || [])[1] || '';
-const medium = (tag.match(/\bmedium="([^"]+)"/i) || [])[1] || '';
-if (type && !type.startsWith('image/')) continue;
-if (medium && medium !== 'image') continue;
-}
-candidates.push(url);
-}
-for (const m of String(block).matchAll(/<enclosure\b[^>]*>/gi)) {
-const tag = m[0];
-const type = (tag.match(/\btype="([^"]+)"/i) || [])[1] || '';
-if (!type.startsWith('image/')) continue;
-const url = (tag.match(/\burl="([^"]+)"/i) || [])[1];
-if (url) candidates.push(url);
-}
-const img = String(descriptionHtml).match(/<img[^>]*\bsrc="([^"]+)"/i);
-if (img) candidates.push(img[1]);
-for (const c of candidates) {
-const url = decodeEntities(c).trim();
-try {
-const u = new URL(url);
-if (u.protocol === 'http:' || u.protocol === 'https:') return url;
-} catch { /* 不正なURLは読み飛ばす */ }
-}
-return '';
-}
-
 export function parseRss(xml, feed = {}) {
 const items = [];
 const blocks = String(xml).match(/<item[\s>][\s\S]*?<\/item>/g) || [];
@@ -169,7 +121,6 @@ items.push({
 title,
 url: link,
 summary: extractSummary(descriptionRaw),
-imageUrl: extractFeedImage(block, descriptionRaw),
 publishedAt: (pick('pubDate') || pick('dc:date')) ? new Date(pick('pubDate') || pick('dc:date')).toISOString() : null,
 source: normalizeSource(stripTags(sourceTag) || feed.source || extractSourceFromTitle(title)),
 category: feed.category || '',
@@ -738,7 +689,8 @@ versionId = Number(v.lastInsertRowid);
 clusterCache.set(clusterId, { title, titleBg, articleBgs: [], summaryWords: new Set(), lastSeenMs: now.getTime(), firstSeenMs: Date.parse(raw.publishedAt || nowIso) || now.getTime(), allStrong: new Set(itemStrong), allProper: new Set(itemProper) });
 }
 // 同一記事が「ラッパーURL」と「直接URL」の両方で届いた場合は直接URL側を残す
-// （ラッパーURLでは本文取得ができないため）。同一媒体・同一版・見出しがほぼ同一のものを同一記事とみなす。
+// （「元記事を読む」のリンクが媒体のページへ直接届くようにするため）。
+// 同一媒体・同一版・見出しがほぼ同一のものを同一記事とみなす。
 const sameVersionArticles = db.prepare('SELECT id, url, title FROM articles WHERE version_id = ? AND source = ?').all(versionId, source);
 let duplicateHandled = false;
 for (const ex of sameVersionArticles) {
@@ -746,12 +698,8 @@ if (matchScore(titleBg, filterWeakBigrams(bigrams(ex.title))) < 0.8) continue;
 const exWrapper = isWrapperUrl(ex.url);
 const newWrapper = isWrapperUrl(raw.url);
 if (exWrapper && !newWrapper) {
-// 既存がラッパーで新規が直接URL: 既存行のURLを直接URLに差し替える（本文キャッシュ等はそのまま）
+// 既存がラッパーで新規が直接URL: 既存行のURLを直接URLに差し替える
 db.prepare('UPDATE articles SET url = ? WHERE id = ?').run(raw.url, ex.id);
-// RSS由来の画像が新規側にだけあれば引き継ぐ
-if (raw.imageUrl) {
-db.prepare("UPDATE articles SET image_url = ?, image_via = 'rss' WHERE id = ? AND image_url = ''").run(raw.imageUrl, ex.id);
-}
 duplicateHandled = true;
 } else if (!exWrapper && newWrapper) {
 // 既存が直接URLで新規がラッパー: 直接URL側を残し、新規は取り込まない
@@ -760,7 +708,7 @@ duplicateHandled = true;
 break;
 }
 if (duplicateHandled) continue;
-db.prepare('INSERT INTO articles (cluster_id, version_id, source, title, url, summary, published_at, fetched_at, image_url, image_via, search_text) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').run(clusterId, versionId, source, title, raw.url, raw.summary || '', raw.publishedAt || null, nowIso, raw.imageUrl || '', raw.imageUrl ? 'rss' : '', buildArticleSearchText(title, raw.summary || '', ''));
+db.prepare('INSERT INTO articles (cluster_id, version_id, source, title, url, summary, published_at, fetched_at, search_text) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)').run(clusterId, versionId, source, title, raw.url, raw.summary || '', raw.publishedAt || null, nowIso, buildArticleSearchText(title, raw.summary || ''));
 db.prepare('UPDATE clusters SET importance_score = ? WHERE id = ?').run(importanceFor(db, clusterId), clusterId);
 const entry = clusterCache.get(clusterId);
 if (entry) {
@@ -923,14 +871,8 @@ const EDITORIAL_RECHECK_WINDOW_MS = 3 * 24 * 3600000;
  */
 export function editorialCheckCandidates(db, { now = new Date(), limit = 50 } = {}) {
   const ranked = db.prepare(`
-    SELECT c.id, c.first_seen_at,
-      (c.importance_score + MIN(COALESCE(b.body_chars, 0) / 2000.0, 5)) AS rank_score
+    SELECT c.id, c.first_seen_at, c.importance_score AS rank_score
     FROM clusters c
-    LEFT JOIN (
-      SELECT cluster_id, MAX(published_at) AS latest_published,
-             SUM(CASE WHEN body_text != '' THEN length(body_text) ELSE 0 END) AS body_chars
-      FROM articles GROUP BY cluster_id
-    ) b ON b.cluster_id = c.id
     WHERE c.importance_score >= ?
     ORDER BY rank_score DESC
     LIMIT ?`).all(EDITORIAL_BATCH_THRESHOLD, limit);

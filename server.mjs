@@ -11,8 +11,7 @@ import { extname, join, dirname, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { openDb } from './src/db.mjs';
 import { refresh, fetchEditorials, checkTopEditorials } from './src/collector.mjs';
-import { fetchClusterBodies, fetchTopImages } from './src/body.mjs';
-import { addBookmark, removeBookmark, isBookmarked, recordRead, foldOldReadEvents, pruneOldClusters, pruneFetchRuns, refilterBodies, backfillAuthors, splitOverMergedClusters, splitForeignVersions, reevaluateEditorials, refreshSearchText, refreshExtracts } from './src/lifecycle.mjs';
+import { addBookmark, removeBookmark, isBookmarked, recordRead, foldOldReadEvents, pruneOldClusters, pruneFetchRuns, purgeBodyData, splitOverMergedClusters, splitForeignVersions, reevaluateEditorials, refreshSearchText } from './src/lifecycle.mjs';
 import { normalizeForSearch } from './src/normalize.mjs';
 import { listKeywords, addKeyword as addKeywordToDb, removeKeyword as removeKeywordFromDb } from './src/keywords.mjs';
 import { runningAsSea, readSeaAsset, defaultDataDir, openBrowser } from './src/sea.mjs';
@@ -34,8 +33,11 @@ const AS_SEA = runningAsSea();
 const DB_PATH = process.env.NEWS_DB_PATH
   || (AS_SEA ? join(defaultDataDir(), 'news.db') : join(ROOT, 'data', 'news.db'));
 const db = openDb(DB_PATH);
-// 検索用シャドウテキスト（title_norm / search_text）を起動時に現在値へ揃える
-// （旧バージョンで作られたDBや、直接投入された行でも検索が効くように）。
+// 本文機能の廃止（2026-11-16）前に保存された本文・画像等のデータを起動時に消去する
+// （移行処理。2回目以降は何も変えない）。あわせて検索用シャドウテキスト
+// （title_norm / search_text）を現在値へ揃える（旧バージョンで作られたDBや、
+// 直接投入された行でも検索が効くように）。
+purgeBodyData(db);
 refreshSearchText(db);
 
 function dbBytes() {
@@ -49,7 +51,7 @@ let refreshing = null;
 function doRefresh() {
   if (!refreshing) {
     refreshing = refresh(db)
-      .then((r) => { kickImageBatch(); kickEditorialBatch(); return r; })
+      .then((r) => { kickEditorialBatch(); return r; })
       .catch((e) => { console.error('refresh failed:', e); return null; })
       .finally(() => { refreshing = null; });
   }
@@ -64,16 +66,6 @@ function kickEditorialBatch() {
   checkTopEditorials(db)
     .catch((e) => { console.error('editorial batch failed:', e); })
     .finally(() => { editorialBatchRunning = false; });
-}
-
-// 段階3: refresh 完了後、重要タブ上位クラスタの og:image を裏で取得する（refresh はブロックしない）
-let imageBatchRunning = false;
-function kickImageBatch() {
-  if (imageBatchRunning) return;
-  imageBatchRunning = true;
-  fetchTopImages(db)
-    .catch((e) => { console.error('image batch failed:', e); })
-    .finally(() => { imageBatchRunning = false; });
 }
 
 function lastFinishedRun() {
@@ -103,7 +95,7 @@ function likePattern(keyword) {
   return `%${keyword.replace(/[\\%_]/g, (ch) => `\\${ch}`)}%`;
 }
 
-function tabWhere(tab, category, muted = [], keywords = [], reporter = null) {
+function tabWhere(tab, category, muted = [], keywords = []) {
   const conds = [];
   const params = [];
   if (tab === 'important') {
@@ -130,7 +122,7 @@ function tabWhere(tab, category, muted = [], keywords = [], reporter = null) {
   }
   if (tab === 'watch') {
     // キーワードウォッチ/検索: 各クラスタ最新版の行だけを出す。
-    // 一致は「クラスタのタイトル、またはそのクラスタの記事（全版）のタイトル/要約/取得済み本文への
+    // 一致は「クラスタのタイトル、またはそのクラスタの記事（全版）のタイトル/要約への
     // 部分一致」。照合は表記ゆれ正規化済みのシャドウカラム（clusters.title_norm /
     // articles.search_text）に対して行い、クエリ側も同じ正規化を通す（例: 「情報漏洩」で
     // 「情報漏えい」の記事がヒットする）。複数キーワードは OR。キーワードが無ければ一致なし（1 = 0）。
@@ -150,17 +142,6 @@ function tabWhere(tab, category, muted = [], keywords = [], reporter = null) {
       conds.push('1 = 0');
     }
   }
-  if (tab === 'reporter') {
-    // 記者ビュー: 指定した媒体（source）＋記者名（author）の記事があるクラスタの最新版行だけを出す。
-    // 同姓同名の別人を混ぜないため媒体で絞る。指定が無ければ一致なし（1 = 0）。
-    conds.push('v.version_no = (SELECT MAX(v2.version_no) FROM versions v2 WHERE v2.cluster_id = c.id)');
-    if (reporter && reporter.source && reporter.author) {
-      conds.push('EXISTS (SELECT 1 FROM articles ar WHERE ar.cluster_id = c.id AND ar.source = ? AND ar.author = ?)');
-      params.push(reporter.source, reporter.author);
-    } else {
-      conds.push('1 = 0');
-    }
-  }
   if (tab === 'new') { conds.push('v.created_at >= ?'); params.push(new Date(Date.now() - 24 * 3600000).toISOString()); }
   if (category && category !== 'すべて') {
     if (category === 'その他') conds.push("c.category = ''");
@@ -172,8 +153,8 @@ function tabWhere(tab, category, muted = [], keywords = [], reporter = null) {
 function tabOrder(tab) {
   // 同一クラスタ内は常に version_no 降順（最新版が先）
   // 重要度スコア自体が「直近24時間の活動」だけで計算される（importanceFor v3）ため、
-  // ここで時間減衰を掛けると二重適用になる。並びはスコア＋本文ブーストのみ。
-  if (tab === 'important' || tab === 'editorials') return `(c.importance_score + MIN(COALESCE(body_chars, 0) / 2000.0, 5)) DESC, latest_published DESC, v.version_no DESC`;
+  // ここで時間減衰を掛けると二重適用になる。並びはスコアのみ。
+  if (tab === 'important' || tab === 'editorials') return 'c.importance_score DESC, latest_published DESC, v.version_no DESC';
   if (tab === 'bookmarks') return '(SELECT b.created_at FROM bookmarks b WHERE b.cluster_id = c.id) DESC, v.version_no DESC';
   if (tab === 'new') return 'v.created_at DESC, v.version_no DESC';
   return 'c.last_seen_at DESC, v.version_no DESC';
@@ -187,13 +168,8 @@ const ROWS_SELECT = `
            COUNT(a.id) AS article_count, COUNT(DISTINCT a.source) AS source_count,
            MAX(a.published_at) AS latest_published,
            GROUP_CONCAT(DISTINCT a.source) AS sources,
-           SUM(CASE WHEN a.body_text != '' THEN 1 ELSE 0 END) AS body_count,
-           SUM(CASE WHEN a.body_text != '' THEN length(a.body_text) ELSE 0 END) AS body_chars,
-           (SELECT substr(COALESCE(NULLIF(a2.extract_text, ''), a2.summary), 1, 120) FROM articles a2
-             WHERE a2.version_id = v.id AND (a2.extract_text != '' OR a2.summary != '') ORDER BY a2.published_at LIMIT 1) AS lead,
-           (SELECT a3.image_url FROM articles a3
-             WHERE a3.version_id = v.id AND a3.image_url != ''
-             ORDER BY (a3.url LIKE 'https://news.google.com/%') ASC, a3.published_at DESC LIMIT 1) AS image_url,
+           (SELECT substr(a2.summary, 1, 120) FROM articles a2
+             WHERE a2.version_id = v.id AND a2.summary != '' ORDER BY a2.published_at LIMIT 1) AS lead,
            (SELECT GROUP_CONCAT(e.paper) FROM (
               SELECT paper FROM editorials WHERE cluster_id = c.id AND found = 1
               ORDER BY CASE paper WHEN '朝日' THEN 1 WHEN '毎日' THEN 2 WHEN '読売' THEN 3 WHEN '産経' THEN 4 WHEN '日経' THEN 5 ELSE 6 END
@@ -202,14 +178,14 @@ const ROWS_SELECT = `
     JOIN clusters c ON c.id = v.cluster_id
     JOIN articles a ON a.version_id = v.id`;
 
-function versionRows(tab, category, limit, offset, muted = [], keywords = [], reporter = null) {
-  const { where, params } = tabWhere(tab, category, muted, keywords, reporter);
+function versionRows(tab, category, limit, offset, muted = [], keywords = []) {
+  const { where, params } = tabWhere(tab, category, muted, keywords);
   return db.prepare(`${ROWS_SELECT} ${where} GROUP BY v.id ORDER BY ${tabOrder(tab)} LIMIT ? OFFSET ?`)
     .all(...params, limit, offset);
 }
 
-function versionTotal(tab, category, muted = [], keywords = [], reporter = null) {
-  const { where, params } = tabWhere(tab, category, muted, keywords, reporter);
+function versionTotal(tab, category, muted = [], keywords = []) {
+  const { where, params } = tabWhere(tab, category, muted, keywords);
   const row = db.prepare(`SELECT COUNT(*) AS total FROM (
     SELECT v.id FROM versions v JOIN clusters c ON c.id = v.cluster_id JOIN articles a ON a.version_id = v.id
     ${where} GROUP BY v.id)`).get(...params);
@@ -217,8 +193,8 @@ function versionTotal(tab, category, muted = [], keywords = [], reporter = null)
 }
 
 /** タブ条件（カテゴリ絞りなし）でのカテゴリ別件数。空カテゴリは「その他」。 */
-function categoryCounts(tab, muted = [], keywords = [], reporter = null) {
-  const { where, params } = tabWhere(tab, null, muted, keywords, reporter);
+function categoryCounts(tab, muted = [], keywords = []) {
+  const { where, params } = tabWhere(tab, null, muted, keywords);
   const rows = db.prepare(`
     SELECT CASE WHEN c.category = '' THEN 'その他' ELSE c.category END AS category, COUNT(DISTINCT v.id) AS count
     FROM versions v JOIN clusters c ON c.id = v.cluster_id JOIN articles a ON a.version_id = v.id
@@ -236,7 +212,7 @@ async function apiStories(url) {
     kicked = kickRefreshIfStale();
   }
   const tabParam = url.searchParams.get('tab') || 'all';
-  const tab = ['important', 'new', 'all', 'bookmarks', 'editorials', 'watch', 'reporter'].includes(tabParam) ? tabParam : 'all';
+  const tab = ['important', 'new', 'all', 'bookmarks', 'editorials', 'watch'].includes(tabParam) ? tabParam : 'all';
   const catParam = url.searchParams.get('category') || 'すべて';
   const category = ['すべて', ...CATEGORIES].includes(catParam) ? catParam : 'すべて';
   const limit = Math.min(500, Math.max(1, Number.parseInt(url.searchParams.get('limit') || '100', 10) || 100));
@@ -255,18 +231,14 @@ async function apiStories(url) {
       .map((s) => s.trim().slice(0, 100))
       .filter(Boolean),
   )].slice(0, 20);
-  // 記者ビューの対象（媒体＋記者名）。両方そろった場合だけ reporter として tabWhere が使う。
-  const repSource = (url.searchParams.get('source') || '').trim().slice(0, 100);
-  const repAuthor = (url.searchParams.get('author') || '').trim().slice(0, 50);
-  const reporter = repSource && repAuthor ? { source: repSource, author: repAuthor } : null;
   return {
-    stories: versionRows(tab, category, limit, offset, muted, keywords, reporter),
-    total: versionTotal(tab, category, muted, keywords, reporter),
+    stories: versionRows(tab, category, limit, offset, muted, keywords),
+    total: versionTotal(tab, category, muted, keywords),
     limit,
     offset,
     refreshing: kicked || refreshing !== null,
     lastRun: lastFinishedRun(),
-    categories: categoryCounts(tab, muted, keywords, reporter),
+    categories: categoryCounts(tab, muted, keywords),
   };
 }
 
@@ -277,7 +249,7 @@ function apiStory(id) {
   const versions = db.prepare('SELECT * FROM versions WHERE cluster_id = ? ORDER BY version_no').all(id)
     .map((v) => ({
       ...v,
-      articles: db.prepare('SELECT source, title, url, resolved_url, summary, extract_text, published_at, body_text, body_fetched_at, body_url, body_via, image_url, author FROM articles WHERE version_id = ? ORDER BY published_at').all(v.id),
+      articles: db.prepare('SELECT source, title, url, summary, published_at FROM articles WHERE version_id = ? ORDER BY published_at').all(v.id),
     }));
   const editorials = db.prepare('SELECT paper, found, title, summary, url, checked_at FROM editorials WHERE cluster_id = ?').all(id);
   return { cluster, versions, editorials };
@@ -355,12 +327,6 @@ const server = createServer(async (req, res) => {
       const editorials = await fetchEditorials(db, Number(edMatch[1]));
       return editorials ? sendJson(res, 200, { editorials }) : sendJson(res, 404, { error: 'not found' });
     }
-    const bodyMatch = p.match(/^\/api\/body\/(\d+)$/);
-    if (bodyMatch && req.method === 'POST') {
-      const id = Number(bodyMatch[1]);
-      const result = await fetchClusterBodies(db, id);
-      return result ? sendJson(res, 200, { ...result, story: apiStory(id) }) : sendJson(res, 404, { error: 'not found' });
-    }
     const bookmarkMatch = p.match(/^\/api\/bookmarks\/(\d+)$/);
     if (bookmarkMatch && req.method === 'POST') {
       const id = Number(bookmarkMatch[1]);
@@ -390,20 +356,18 @@ const server = createServer(async (req, res) => {
       return recordRead(db, id) ? sendJson(res, 200, { ok: true }) : sendJson(res, 404, { error: 'not found' });
     }
     if (p === '/api/maintenance' && req.method === 'POST') {
-      // 手動整理: 保持期間 prune ＋ 閲覧集計 ＋ fetch_runs 整理 ＋ 本文ノイズ除去の後がけ ＋ 記者署名の後がけ ＋ 過剰統合の分離 ＋ 社説の再評価 ＋ VACUUM（強制）。前後の容量を返す
+      // 手動整理: 保持期間 prune ＋ 閲覧集計 ＋ fetch_runs 整理 ＋ 本文データの消去（移行） ＋ 過剰統合の分離 ＋ 社説の再評価 ＋ VACUUM（強制）。前後の容量を返す
       const before = dbBytes();
       const foldedReads = foldOldReadEvents(db);
       const prunedClusters = pruneOldClusters(db);
       pruneFetchRuns(db);
-      const refilteredBodies = refilterBodies(db);
-      const backfilledAuthors = backfillAuthors(db);
+      const purgedBodyData = purgeBodyData(db);
       const splitClusters = splitOverMergedClusters(db);
       const splitForeign = splitForeignVersions(db);
       const refreshedSearchText = refreshSearchText(db);
-      const refreshedExtracts = refreshExtracts(db);
       const reevaluatedEditorials = reevaluateEditorials(db);
       db.exec('VACUUM');
-      return sendJson(res, 200, { pruned_clusters: prunedClusters, folded_reads: foldedReads, refiltered_bodies: refilteredBodies, backfilled_authors: backfilledAuthors, split_clusters: splitClusters, split_foreign_versions: splitForeign, refreshed_search_text: refreshedSearchText, refreshed_extracts: refreshedExtracts, reevaluated_editorials: reevaluatedEditorials, before_bytes: before, after_bytes: dbBytes() });
+      return sendJson(res, 200, { pruned_clusters: prunedClusters, folded_reads: foldedReads, purged_body_data: purgedBodyData, split_clusters: splitClusters, split_foreign_versions: splitForeign, refreshed_search_text: refreshedSearchText, reevaluated_editorials: reevaluatedEditorials, before_bytes: before, after_bytes: dbBytes() });
     }
     if (p === '/api/status' && req.method === 'GET') {
       const counts = db.prepare('SELECT (SELECT COUNT(*) FROM clusters) AS clusters, (SELECT COUNT(*) FROM versions) AS versions, (SELECT COUNT(*) FROM articles) AS articles').get();

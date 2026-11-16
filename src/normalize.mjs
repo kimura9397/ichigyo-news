@@ -26,7 +26,7 @@ export function normalizeForSearch(text) {
   return s;
 }
 
-/** 記事の照合用シャドウテキスト（タイトル＋要約＋取得済み本文を正規化して連結）。 */
-export function buildArticleSearchText(title, summary, bodyText) {
-  return normalizeForSearch(`${title ?? ''}\n${summary ?? ''}\n${bodyText ?? ''}`);
+/** 記事の照合用シャドウテキスト（タイトル＋要約を正規化して連結）。 */
+export function buildArticleSearchText(title, summary) {
+  return normalizeForSearch(`${title ?? ''}\n${summary ?? ''}`);
 }
