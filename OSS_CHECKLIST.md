@@ -132,4 +132,5 @@ README の下書き（冒頭部分のみ、この監査ラウンドの範囲）:
 - リポジトリの公開切替、ブランチ保護、About 欄の設定 — ユーザーが GitHub の画面で行う。
 - CI（`.github/workflows/test.yml`）のリモート反映 — PAT への Workflows 権限追加、またはユーザー自身の push が必要（4節）。
 - README のスクリーンショット3枚 — ユーザー実機で撮影して `docs/images/` に置く（2節）。
-- 非エンジニア向け配布物（SEA）— 実施済み（3節）。Windows 実機での起動確認と、Release への exe 添付（次回リリース時）が残る。寄付導線は未設置で、公開の必須条件として残る。
+- 非エンジニア向け配布物（SEA）— 実施済み（3節）。Windows 実機での起動確認と、Release への exe 添付（次回リリース時）が残る。
+- 寄付導線（Ko-fi）— 設置済み。Ko-fi ページ（https://ko-fi.com/ichigyo_news ）を開設し、`.github/FUNDING.yml`（`ko_fi: ichigyo_news`）と README の連絡先へのリンクを置いた。公開の必須条件だった寄付導線はこれで充足。受け取り側の Stripe 連携の完了確認はユーザー側に残る。

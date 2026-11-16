@@ -110,4 +110,6 @@ node server.mjs
 
 要望・不具合の報告は X の [@ichigyo_news](https://x.com/ichigyo_news) まで。GitHub の Issue はバグ報告と機能要望の窓口として開けていますが、使い方の相談は X の方が早く拾えます。
 
+寄付で応援したい方は [Ko-fi](https://ko-fi.com/ichigyo_news) から。いただいた分は開発時間と検証環境の足しにします。
+
 ライセンスは MIT です（[LICENSE](LICENSE)）。
