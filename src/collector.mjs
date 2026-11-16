@@ -248,6 +248,67 @@ for (const kw of FACT_KEYWORDS) if (title.includes(kw)) tokens.add(kw);
 return tokens;
 }
 
+/**
+ * 数値トークンの「単位の型」を返す。数値は値ではなく型で比べるための正規化で、
+ * 数値トークンでなければ null、単位のない数値は '' を返す（% と ％ は同一視する）。
+ */
+export function numericUnitType(token) {
+const m = String(token).match(/^[0-9０-９]+(?:\.[0-9０-９]+)?\s*(.*)$/);
+return m ? m[1].replace('％', '%') : null;
+}
+
+/** 見出しの数値部分を伏せた文字列（数値以外の文面の同一性を見るため）。 */
+function maskNumbers(title) {
+return String(title).replace(/[0-9０-９]+(?:\.[0-9０-９]+)?/g, '#');
+}
+
+/** 改訂の根拠にしない数値の型: 日付（日・月・年）と単位のない裸数値。 */
+const NON_FACT_NUMERIC_TYPES = new Set(['', '日', '月', '年']);
+
+/**
+ * 候補見出しの新規性が「既存の版にある型の数値の値の変化」だけでできているか
+ * （得票率 45.8% → 46.2% のような、同じ量の改訂）。版は「新しい事実が足された
+ * とき」だけ作るという定義（2026-11-16 ユーザー決定）に合わせ、改訂は新しい
+ * 事実に数えない。条件は次の全てを満たすこと:
+ * - 単位のある数値（%、人、円、件など）で、値が変わり、型は既存の版にある
+ *   ものが1つ以上ある（型ごと新しい数値は新しい事実として扱い、対象外）
+ * - 事実キーワードの新規出現がない（あれば新しい事実）
+ * - 数値を伏せて比べたとき、候補の文面の新規バイグラム比率が 0.5 未満である
+ *   （数値以外に実質的な新情報がある場合は改訂とみなさない。例: 防衛費の
+ *   「防衛省は70兆円台を要求」は、新しい主体の新しい主張を含むため対象外）
+ * 日付と裸数値は改訂の根拠にも、改訂を妨げる根拠にもしない。日付はシリーズ
+ * 見出しの日付欄のように話題自体でないことが多く、裸数値はスコアや日付の
+ * 断片など何にでも現れて「同じ型」と言えてしまうため（実DBでの誤判定:
+ * 日替わりコーナーの別日分同士、地方スポーツ面の別試合同士が、共有する
+ * 定型文と裸数値だけで改訂と判定された）。
+ */
+export function isNumericOnlyRevision(existingTitles, newTitle) {
+const existingTokens = new Set();
+const existingTypes = new Set();
+for (const et of existingTitles) for (const t of factTokens(et)) {
+existingTokens.add(t);
+const ty = numericUnitType(t);
+if (ty !== null) existingTypes.add(ty);
+}
+let sawNumericChange = false;
+for (const t of factTokens(newTitle)) {
+if (existingTokens.has(t)) continue;
+const ty = numericUnitType(t);
+if (ty === null) return false;
+if (NON_FACT_NUMERIC_TYPES.has(ty)) continue;
+if (!existingTypes.has(ty)) return false;
+sawNumericChange = true;
+}
+if (!sawNumericChange) return false;
+const maskedExisting = new Set();
+for (const et of existingTitles) for (const b of bigrams(maskNumbers(et))) maskedExisting.add(b);
+const nb = bigrams(maskNumbers(newTitle));
+if (!nb.size) return false;
+let novel = 0;
+for (const b of nb) if (!maskedExisting.has(b)) novel++;
+return novel / nb.size < 0.5;
+}
+
 /** アンカー判定から外す汎用ユニット（どの話題にも出てくる語・数量の型・単位語・バズワード）。 */
 const ANCHOR_GENERIC_UNITS = new Set(['可能性', '情報', 'ガバナンス']);
 const ANCHOR_GENERIC_UNIT_RE = /^最大|^(メートル|キロ|センチ|ミリ|グラム|リットル)$/;
@@ -417,6 +478,8 @@ return false;
 * - アンカー（同じ話の続報であることの裏付け、hasStoryAnchor）があること
 * - 新規バイグラム比率が高い AND（新規の事実トークンがある OR 新規比率が非常に高い）
 * を満たす場合のみ「新事実を含む続報」として新バージョンにする。
+* ただし新規性が数値の改訂だけでできている場合（isNumericOnlyRevision）は、
+* 比率が高くても版を作らない（版作成の厳格化、2026-11-16）。
 * 旧判定は新規性しか見ていなかったため、クラスタに紛れ込んだ別ニュースの記事が
 * 「版タイトル群とほぼ重ならない＝新規性が高い」という理由でほぼ必ず新バージョンに
 * なっていた（2026-11-16 ユーザー報告の誤判定）。anchor を渡さない呼び出しでは
@@ -432,6 +495,7 @@ const newFacts = new Set([...factTokens(newTitle)].filter((t) => ![...existingTi
 let novel = 0;
 for (const b of nb) if (!allExisting.has(b)) novel++;
 const novelRatio = novel / nb.size;
+if (isNumericOnlyRevision(existingTitles, newTitle)) return false;
 return (novelRatio >= 0.5 && newFacts.size > 0) || novelRatio >= 0.8;
 }
 
@@ -713,6 +777,17 @@ let bestScore = 0;
 for (const v of vRows) {
 const s = matchScore(titleBg, filterWeakBigrams(bigrams(v.title)));
 if (s > bestScore) { bestScore = s; target = v; }
+}
+// 数値の改訂だけの記事は現在版（最新版）に取り込み、版の代表見出しを新しい方へ
+// 更新する（古い速報値の見出しが版の顔として残り続けないようにする）。
+// 判定は最新版の見出しに対して行い、錨が無い記事（別ニュースの紛れ込み）は
+// 代表見出しを書き換えない。
+if (hasStoryAnchor(title, clusterTitle, vTitles, articleTitles) && isNumericOnlyRevision([latest.title], title)) {
+target = latest;
+if (latest.title !== title) {
+db.prepare('UPDATE versions SET title = ? WHERE id = ?').run(title, latest.id);
+latest.title = title;
+}
 }
 versionId = target.id;
 }

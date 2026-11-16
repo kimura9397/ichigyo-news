@@ -7,7 +7,7 @@
 // - 保存済みの社説（found=1）は現在の関連判定で再評価し、通らないものは found=0 に降格する（社説の誤マッチ対策、2026-11-15）。
 // - 本文機能の廃止（2026-11-16）に伴い、既存DBに残る本文・画像・記者名の保存データは
 //   purgeBodyData で消去する（サーバー起動時と refresh のライフサイクルで実行、冪等）。
-import { editorialRelated, importanceFor, bigrams, filterWeakBigrams, matchScore, jaccard, strongTerms, summaryWords, refineCategory, hasStoryAnchor } from './collector.mjs';
+import { editorialRelated, importanceFor, bigrams, filterWeakBigrams, matchScore, jaccard, strongTerms, summaryWords, refineCategory, hasStoryAnchor, isNumericOnlyRevision } from './collector.mjs';
 import { normalizeForSearch, buildArticleSearchText } from './normalize.mjs';
 
 export const RETENTION_DAYS = 7;
@@ -318,6 +318,65 @@ export function splitForeignVersions(db) {
   return split;
 }
 
+/* ---------- 数値の改訂だけの版の畳み込み ---------- */
+
+/**
+ * 「既存の版にある型の数値の値の変化」だけで作られた版を、前の版へ畳む保守処理
+ * （2026-11-16、版作成の厳格化の遡及適用）。物差しは版作成側の判定
+ * （isNumericOnlyRevision）と同じだが、比べる相手は直前の生存版のタイトル
+ * 1つに限る。全履歴と比べると、段階変化の版（当選確定など）を挟んだ後ろの
+ * 改訂版が段階版へ畳まれてしまい、段階版の代表見出しが改訂見出しに化けた
+ * うえ、次の実行でさらに畳まれる（冪等でなくなる）ため。直前の版の改訂で
+ * ある場合にだけ畳むことで、各版の判定が直前の生存版のタイトルだけに依存し、
+ * 2回目の実行は必ず0件になる。
+ * 畳んだ版の記事は前の版へ移し、前の版の代表見出しは畳んだ版の見出し
+ * （新しい方）へ更新する。残った版は番号を振り直す。事実キーワードの新規
+ * 出現や、型ごと新しい数値、数値以外の実質的な新情報を含む版は畳まない。
+ * 畳んだ版の数を返す。
+ */
+export function foldNumericOnlyVersions(db) {
+  const clusters = db.prepare('SELECT id, title FROM clusters').all();
+  if (!clusters.length) return 0;
+  const versionsStmt = db.prepare('SELECT id, version_no, title FROM versions WHERE cluster_id = ? ORDER BY version_no');
+  const moveArticles = db.prepare('UPDATE articles SET version_id = ? WHERE version_id = ?');
+  const renameVersion = db.prepare('UPDATE versions SET title = ? WHERE id = ?');
+  const deleteVersion = db.prepare('DELETE FROM versions WHERE id = ?');
+  const renumber = db.prepare('UPDATE versions SET version_no = ? WHERE id = ?');
+  const updateScore = db.prepare('UPDATE clusters SET importance_score = ? WHERE id = ?');
+  let folded = 0;
+  const affected = new Set();
+  db.exec('BEGIN IMMEDIATE');
+  try {
+    for (const c of clusters) {
+      const versions = versionsStmt.all(c.id);
+      if (versions.length < 2) continue;
+      const survivors = [versions[0]];
+      let prev = versions[0];
+      let changed = false;
+      for (let i = 1; i < versions.length; i++) {
+        const v = versions[i];
+        if (isNumericOnlyRevision([prev.title], v.title)) {
+          moveArticles.run(prev.id, v.id);
+          renameVersion.run(v.title, prev.id);
+          prev = { ...prev, title: v.title };
+          survivors[survivors.length - 1] = prev;
+          deleteVersion.run(v.id);
+          folded++;
+          changed = true;
+          affected.add(c.id);
+        } else {
+          survivors.push(v);
+          prev = v;
+        }
+      }
+      if (changed) survivors.forEach((v, idx) => { if (v.version_no !== idx + 1) renumber.run(idx + 1, v.id); });
+    }
+    for (const id of affected) updateScore.run(importanceFor(db, id), id);
+    db.exec('COMMIT');
+  } catch (e) { try { db.exec('ROLLBACK'); } catch {} throw e; }
+  return folded;
+}
+
 /* ---------- 保存済み社説の再評価 ---------- */
 
 /**
@@ -404,8 +463,9 @@ export function recomputeAllImportance(db, now = new Date()) {
 
 /**
  * refresh 時に行うライフサイクル一式: 閲覧集計 → prune → fetch_runs 整理 →
- * 本文データの消去（移行） → 過剰統合の分離 → 社説の再評価 → 自動 VACUUM 判定。
- * 戻り値: { prunedClusters, foldedReads, purgedBodyData, splitClusters, splitForeignVersions, reevaluatedEditorials, vacuumed }
+ * 本文データの消去（移行） → 過剰統合の分離 → 別ニュースの版の分離 →
+ * 数値の改訂だけの版の畳み込み → 社説の再評価 → 自動 VACUUM 判定。
+ * 戻り値: { prunedClusters, foldedReads, purgedBodyData, splitClusters, splitForeignVersions, foldedNumericVersions, reevaluatedEditorials, vacuumed }
  */
 export function runLifecycle(db, now = new Date()) {
   const foldedReads = foldOldReadEvents(db, now);
@@ -414,9 +474,10 @@ export function runLifecycle(db, now = new Date()) {
   const purgedBodyData = purgeBodyData(db);
   const splitClusters = splitOverMergedClusters(db);
   const splitForeign = splitForeignVersions(db);
+  const foldedNumericVersions = foldNumericOnlyVersions(db);
   const refreshedSearchText = refreshSearchText(db);
   const reevaluatedEditorials = reevaluateEditorials(db);
   const recomputedImportance = recomputeAllImportance(db, now);
   const vacuumed = vacuumIfNeeded(db);
-  return { prunedClusters, foldedReads, purgedBodyData, splitClusters, splitForeignVersions: splitForeign, refreshedSearchText, reevaluatedEditorials, recomputedImportance, vacuumed };
+  return { prunedClusters, foldedReads, purgedBodyData, splitClusters, splitForeignVersions: splitForeign, foldedNumericVersions, refreshedSearchText, reevaluatedEditorials, recomputedImportance, vacuumed };
 }

@@ -11,7 +11,7 @@ import { extname, join, dirname, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { openDb } from './src/db.mjs';
 import { refresh, fetchEditorials, checkTopEditorials } from './src/collector.mjs';
-import { addBookmark, removeBookmark, isBookmarked, recordRead, foldOldReadEvents, pruneOldClusters, pruneFetchRuns, purgeBodyData, splitOverMergedClusters, splitForeignVersions, reevaluateEditorials, refreshSearchText } from './src/lifecycle.mjs';
+import { addBookmark, removeBookmark, isBookmarked, recordRead, foldOldReadEvents, pruneOldClusters, pruneFetchRuns, purgeBodyData, splitOverMergedClusters, splitForeignVersions, foldNumericOnlyVersions, reevaluateEditorials, refreshSearchText } from './src/lifecycle.mjs';
 import { normalizeForSearch } from './src/normalize.mjs';
 import { listKeywords, addKeyword as addKeywordToDb, removeKeyword as removeKeywordFromDb } from './src/keywords.mjs';
 import { runningAsSea, readSeaAsset, defaultDataDir, openBrowser } from './src/sea.mjs';
@@ -395,7 +395,7 @@ const server = createServer(async (req, res) => {
       return recordRead(db, id) ? sendJson(res, 200, { ok: true }) : sendJson(res, 404, { error: 'not found' });
     }
     if (p === '/api/maintenance' && req.method === 'POST') {
-      // 手動整理: 保持期間 prune ＋ 閲覧集計 ＋ fetch_runs 整理 ＋ 本文データの消去（移行） ＋ 過剰統合の分離 ＋ 社説の再評価 ＋ VACUUM（強制）。前後の容量を返す
+      // 手動整理: 保持期間 prune ＋ 閲覧集計 ＋ fetch_runs 整理 ＋ 本文データの消去（移行） ＋ 過剰統合の分離 ＋ 別ニュースの版の分離 ＋ 数値の改訂だけの版の畳み込み ＋ 社説の再評価 ＋ VACUUM（強制）。前後の容量を返す
       const before = dbBytes();
       const foldedReads = foldOldReadEvents(db);
       const prunedClusters = pruneOldClusters(db);
@@ -403,10 +403,11 @@ const server = createServer(async (req, res) => {
       const purgedBodyData = purgeBodyData(db);
       const splitClusters = splitOverMergedClusters(db);
       const splitForeign = splitForeignVersions(db);
+      const foldedNumericVersions = foldNumericOnlyVersions(db);
       const refreshedSearchText = refreshSearchText(db);
       const reevaluatedEditorials = reevaluateEditorials(db);
       db.exec('VACUUM');
-      return sendJson(res, 200, { pruned_clusters: prunedClusters, folded_reads: foldedReads, purged_body_data: purgedBodyData, split_clusters: splitClusters, split_foreign_versions: splitForeign, refreshed_search_text: refreshedSearchText, reevaluated_editorials: reevaluatedEditorials, before_bytes: before, after_bytes: dbBytes() });
+      return sendJson(res, 200, { pruned_clusters: prunedClusters, folded_reads: foldedReads, purged_body_data: purgedBodyData, split_clusters: splitClusters, split_foreign_versions: splitForeign, folded_numeric_versions: foldedNumericVersions, refreshed_search_text: refreshedSearchText, reevaluated_editorials: reevaluatedEditorials, before_bytes: before, after_bytes: dbBytes() });
     }
     if (p === '/api/status' && req.method === 'GET') {
       const counts = db.prepare('SELECT (SELECT COUNT(*) FROM clusters) AS clusters, (SELECT COUNT(*) FROM versions) AS versions, (SELECT COUNT(*) FROM articles) AS articles').get();
