@@ -1019,10 +1019,17 @@ function App() {
   }
 
   async function handleRefresh() {
-    if (refreshing) return
+    if (refreshing || bgRefreshing) return
     setRefreshing(true)
     try {
-      await refreshFeed()
+      const { alreadyRunning } = await refreshFeed()
+      if (alreadyRunning) {
+        // 別のタブ・ウィンドウ等が開始した収集が実行中。自分では開始せず、
+        // 背後更新の仕組み（bgRefreshing のポーリング）で完了後に取り直す
+        setBgRefreshing(true)
+        await loadPage(tab, category, 0, false)
+        return
+      }
       setRows({})
       setPages({})
       setDetailState({})
@@ -1118,12 +1125,12 @@ function App() {
               type="button"
               className="icon-btn"
               onClick={handleRefresh}
-              disabled={refreshing}
+              disabled={refreshing || bgRefreshing}
               title="最新ニュースに更新"
               aria-label="最新ニュースに更新"
             >
               <svg
-                className={refreshing ? 'spin' : undefined}
+                className={refreshing || bgRefreshing ? 'spin' : undefined}
                 width="17"
                 height="17"
                 viewBox="0 0 24 24"

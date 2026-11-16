@@ -58,14 +58,24 @@ const CATEGORIES = ['社会', '政治', '経済', '国際', 'スポーツ', '文
 const IMPORTANT_THRESHOLD = 40; // 重要度スコアv3（直近24時間の活動のみ）の実DB分布で再設定（2026-11-15計測: 40以上が31クラスタ）
 
 let refreshing = null;
+/**
+ * 収集を開始する。既に実行中なら新しい収集は開始せず、started: false で返す
+ * （更新の連打対策、2026-11-16 ユーザー指示: 複数タブ・複数ウィンドウから
+ * 同時に要求されても、収集は常に1本だけ走る状態にする。固定のクールダウンは
+ * 設けず、ロックは実行中の間だけ）。
+ */
+function startRefresh() {
+  if (refreshing) return { promise: refreshing, started: false };
+  refreshing = refresh(db)
+    .then((r) => { kickEditorialBatch(); return r; })
+    .catch((e) => { console.error('refresh failed:', e); return null; })
+    .finally(() => { refreshing = null; });
+  return { promise: refreshing, started: true };
+}
+
+/** 収集の完了を待つ（実行中ならその収集に相乗りする）。背後更新（SWR）用。 */
 function doRefresh() {
-  if (!refreshing) {
-    refreshing = refresh(db)
-      .then((r) => { kickEditorialBatch(); return r; })
-      .catch((e) => { console.error('refresh failed:', e); return null; })
-      .finally(() => { refreshing = null; });
-  }
-  return refreshing;
+  return startRefresh().promise;
 }
 
 // 背景社説チェック: refresh 完了後、重要タブ上位クラスタの社説を裏で確認する（refresh はブロックしない）
@@ -335,7 +345,14 @@ const server = createServer(async (req, res) => {
       return res.end('unauthorized');
     }
     if (p === '/api/stories' && req.method === 'GET') return sendJson(res, 200, await apiStories(url));
-    if (p === '/api/refresh' && req.method === 'POST') return sendJson(res, 200, (await doRefresh()) || { error: 'refresh failed' });
+    if (p === '/api/refresh' && req.method === 'POST') {
+      const { promise, started } = startRefresh();
+      // 実行中は新しい収集を開始せず、現在の状態を即座に返す（呼び出し側は
+      // 背後更新の完了待ちに切り替える）
+      if (!started) return sendJson(res, 200, { alreadyRunning: true, refreshing: true, lastRun: lastFinishedRun() });
+      const result = await promise;
+      return sendJson(res, 200, result ? { ...result, alreadyRunning: false, refreshing: false } : { error: 'refresh failed' });
+    }
     const storyMatch = p.match(/^\/api\/story\/(\d+)$/);
     if (storyMatch && req.method === 'GET') {
       const id = Number(storyMatch[1]);

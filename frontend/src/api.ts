@@ -472,9 +472,13 @@ export async function fetchEditorials(
     .filter((e): e is EditorialInfo => e !== null)
 }
 
-/** ニュースの再取得を依頼する。 */
-export async function refreshFeed(): Promise<void> {
-  await fetchJson('/api/refresh', { method: 'POST' })
+/** ニュースの再取得を依頼する。サーバー側で既に収集中の場合は新しい収集は
+ *  開始されず、alreadyRunning: true が返る（呼び出し側は背後更新の完了を待つ）。 */
+export async function refreshFeed(): Promise<{ alreadyRunning: boolean }> {
+  const data = await fetchJson<{ alreadyRunning?: boolean }>('/api/refresh', {
+    method: 'POST',
+  })
+  return { alreadyRunning: data.alreadyRunning === true }
 }
 
 /* ---------- ブックマーク・閲覧ログ・DB保守 ---------- */
