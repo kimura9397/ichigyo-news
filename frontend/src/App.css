@@ -1372,9 +1372,17 @@
   }
 }
 
+/* 全画面トグル（マストヘッド側と同じ .icon-btn）。スポットライト中は
+   マストヘッドが隠れるため、トップバーの停止ボタンの左隣にも出す
+   （2026-11-16 ユーザー指示）。右側の操作群の先頭として右寄せの起点にし、
+   停止ボタンはその右に続く */
+.spotlight-fullscreen {
+  flex: none;
+  margin-inline-start: auto;
+}
+
 .spotlight-stop {
   appearance: none;
-  margin-inline-start: auto;
   border: 0;
   border-radius: 999px;
   background: var(--vermillion);

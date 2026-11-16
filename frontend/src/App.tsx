@@ -1604,6 +1604,8 @@ function App() {
           sourceWatchKeywords={spotlightWatchKeywords}
           sourceLabel={spotlightSourceLabel}
           rotateMs={spotlightSeconds * 1000}
+          isFullscreen={isFullscreen}
+          onToggleFullscreen={toggleFullscreen}
           onStop={() => setSpotlightActive(false)}
         />
       ) : (

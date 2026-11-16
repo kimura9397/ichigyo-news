@@ -11,6 +11,8 @@
 // 表示は必ず1画面に収める（スクロールさせない）。収まらない分は各紙の
 // 抜粋を行数クランプで切り落とす（2026-11-16 ユーザー指示）。
 // 左上には、いまどのビューの一覧を流しているかを小さく出す（同日追加指示）。
+// マストヘッドが隠れて全画面の開始・終了ができなくなるため、全画面ボタンも
+// トップバーに出す（同日追加指示。挙動はマストヘッド側と共通の props 経由）。
 // 停止は表示内の「スポットライトを停止」ボタンだけ（ユーザーの明示指示）:
 // マウス移動・他の場所のクリック・キー操作では止めない。
 import { useEffect, useRef, useState } from 'react'
@@ -37,6 +39,10 @@ interface SpotlightProps {
   sourceLabel: string
   /** 1件あたりの表示時間（ミリ秒）。設定で変更でき、次の見出しから反映される */
   rotateMs: number
+  /** 全画面かどうか（マストヘッド側のボタンと状態を共有する） */
+  isFullscreen: boolean
+  /** 全画面の開始・終了（マストヘッド側のボタンと同じ処理） */
+  onToggleFullscreen: () => void
   onStop: () => void
 }
 
@@ -55,6 +61,8 @@ export default function Spotlight({
   sourceWatchKeywords,
   sourceLabel,
   rotateMs,
+  isFullscreen,
+  onToggleFullscreen,
   onStop,
 }: SpotlightProps) {
   /** 社説タブから開いた場合は各紙の表示を社説中心にする */
@@ -240,6 +248,32 @@ export default function Spotlight({
               {notice}
             </span>
           ) : null}
+          <button
+            type="button"
+            className="icon-btn spotlight-fullscreen"
+            onClick={onToggleFullscreen}
+            aria-pressed={isFullscreen}
+            title={isFullscreen ? '全画面を終了' : '全画面にする'}
+            aria-label={isFullscreen ? '全画面を終了' : '全画面にする'}
+          >
+            <svg
+              width="17"
+              height="17"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              aria-hidden="true"
+            >
+              {isFullscreen ? (
+                <path d="M8 3v3a2 2 0 0 1-2 2H3m18 0h-3a2 2 0 0 1-2-2V3m0 18v-3a2 2 0 0 1 2-2h3M3 16h3a2 2 0 0 1 2 2v3" />
+              ) : (
+                <path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3" />
+              )}
+            </svg>
+          </button>
           <button type="button" className="spotlight-stop" onClick={onStop}>
             スポットライトを停止
           </button>
