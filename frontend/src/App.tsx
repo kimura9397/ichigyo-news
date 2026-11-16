@@ -1786,8 +1786,8 @@ function App() {
                             className="row-thumb"
                             src={story.imageUrl}
                             alt=""
-                            width={72}
-                            height={54}
+                            width={88}
+                            height={66}
                             loading="lazy"
                             referrerPolicy="no-referrer"
                             onError={(e) => {
