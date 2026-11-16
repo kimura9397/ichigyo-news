@@ -1,0 +1,4 @@
+# Vite のビルド生成物。GitHub の言語統計（Linguist）から除外する。
+# 原典は frontend/ 側にあり、public/ へはビルドで出力される。
+public/assets/** linguist-generated=true
+public/index.html linguist-generated=true
