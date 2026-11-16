@@ -117,18 +117,19 @@ export function vacuumIfNeeded(db) {
 /* ---------- 保存済み本文へのノイズ除去の後がけ ---------- */
 
 /**
- * 保存済みの本文（articles.body_text）に、行単位のノイズ除去フィルタを後がけする。
+ * 保存済みの本文（articles.body_text）に、ノイズ除去フィルタを後がけする。
  * フィルタで内容が変わった記事だけを更新する。更新した記事数を返す。
+ * タイトルも渡し、先頭のタイトル重複行や末尾の他記事見出しリストも落とす。
  */
 export function refilterBodies(db) {
-  const rows = db.prepare("SELECT id, body_text FROM articles WHERE body_text != ''").all();
+  const rows = db.prepare("SELECT id, title, body_text FROM articles WHERE body_text != ''").all();
   if (!rows.length) return 0;
   const update = db.prepare('UPDATE articles SET body_text = ? WHERE id = ?');
   let changed = 0;
   db.exec('BEGIN IMMEDIATE');
   try {
     for (const r of rows) {
-      const cleaned = filterBodyLines(r.body_text);
+      const cleaned = filterBodyLines(r.body_text, r.title);
       if (cleaned !== r.body_text) { update.run(cleaned, r.id); changed++; }
     }
     db.exec('COMMIT');

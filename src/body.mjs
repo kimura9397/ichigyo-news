@@ -232,12 +232,27 @@ export function extractAuthor(html, text) {
   return extractAuthorFromText(text) || extractAuthorFromHtml(html);
 }
 
-// ---------- 本文のノイズ除去（2026-11-15 ユーザー承認） ----------
+// ---------- 本文のノイズ除去（2026-11-15 ユーザー承認、2026-11-16 拡張） ----------
 // 取得本文に「Xでシェア！」「メールマガジン登録！」等の定型文が混ざると読む気を削ぐため、
 // (1) 構造での除外: class/id にノイズ語を含む要素を丸ごと落とす
 // (2) 行単位のフィルタ: 段落テキストから定型の勧誘・案内・フッター行を落とす
 // の2段で除去する。実文の誤爆を避けるため、パターンは具体形に絞り、
 // 行フィルタの多くは「短い行」にだけ適用する（実文は通常長い）。
+//
+// 2026-11-16 の拡張（ユーザー指摘「別記事のリンク文言が本文に入る」への対応、実データで分類）:
+// 実フィードの本文を実測すると、残っていたノイズの最大要因は本文末尾に付く
+// 「他記事の見出しリスト」（Yahoo!/朝日/NHK/時事いずれでも発生。関連・おすすめ記事の
+// 見出しが段落として何行も連なる）だった。あわせて次の定型も実例を確認した:
+// - 朝日の有料勧誘（「有料会員になると…」「読み放題」キャンペーン、「詳しくは こちら」）
+// - 有料記事のティーザー段落（行頭「記事の後半では」）
+// - 関連記事カードの見出し行（末尾に「出典： 媒体名 日付」）
+// - 先頭での記事タイトル重複（タイトルそのままの行、タイトル＋配信日時の行）
+// - 著者プロフィール段落（メールアドレス＋執筆・著書等の語を含む）
+// - 投票ウィジェットの設問（見出しリストの直前に単独行で残る質問文）
+// 対策は filterBodyLines に集約する: 行フィルタへの定型追加に加え、ブロック単位の
+// 処理（プロフィール段落の除外、先頭のタイトル重複行の除外、末尾の見出し行ランの除去）
+// を行う。写真キャプションや中見出しのような正当な要素は対象にしない（末尾の見出しランは
+// 「文で終わらない行が3行以上連続し、前に文のある行が残る場合」に限って落とす）。
 
 /** class/id のトークン（空白・ハイフン等で分割した断片）がこの語で始まる要素はノイズとみなす。 */
 const NOISE_ATTR_TOKENS = [
@@ -315,6 +330,20 @@ function isNoiseLine(line) {
   if (/アプリで(読む|開く|見る)|アプリをダウンロード|アプリのダウンロード/.test(t)) return true;
   if (/ログイン(して|すると|が必要|画面)/.test(t) && mid) return true;
   if (/この記事はいかがでしたか/.test(t)) return true;
+  // リンク文言の残骸（「詳しくは こちら」はタグ除去で空白が挟まる形でも現れる。実文には現れない）
+  if (/詳しくは\s*こちら/.test(t)) return true;
+  // 有料会員・購読の勧誘とキャンペーン文言（朝日で実例確認）
+  if (/有料会員になると/.test(t)) return true;
+  if (/会員限定の有料記事/.test(t) && /(お読み|ご覧)いただけます/.test(t)) return true;
+  if (/読み放題/.test(t)) return true;
+  // 有料記事のティーザー段落（後半の内容予告）
+  if (/^記事の後半では/.test(t)) return true;
+  // 関連記事カードの見出し行（末尾に「出典： 媒体名 日付」が付く形。出典に触れる実文は長いので長さで絞る）
+  if (/出典[：:]/.test(t) && t.length <= 150) return true;
+  // アンケート・投票への誘導（短い行だけ）
+  if (/アンケート/.test(t) && t.length < 60) return true;
+  // PR・広告の単独表記行
+  if (/^(PR|【PR】|［PR］|広告)$/i.test(t)) return true;
   // NHK の配信サービス案内（定型文そのままの断片だけを対象にする）
   if (/NHK ONEはどなたでも|受信契約がお済みの世帯|契約をされていない世帯の方が利用した場合は|受信契約の詳細や/.test(t)) return true;
   // 有料ティーザーの末尾行（「続きを読む」は短い行だけを対象にする）
@@ -328,14 +357,134 @@ function isNoiseLine(line) {
   return false;
 }
 
+/** メールアドレスらしき文字列（著者プロフィール段落の判定用）。 */
+const EMAIL_RE = /[\w.+-]+@[\w-]+(?:\.[\w-]+)+/;
+/** 著者プロフィール・連絡先ブロックに現れる語。 */
+const PROFILE_WORD_RE = /(執筆|著書|ライター|ご依頼|プロフィール|生まれ)/;
+
+/**
+ * ブロックが著者プロフィール（連絡先含む）かどうか。本文の段落がメールアドレスと
+ * プロフィール語の両方を含むことはまず無いため、この組合せに限って丸ごと落とす。
+ */
+function isProfileBlock(block) {
+  return EMAIL_RE.test(block) && PROFILE_WORD_RE.test(block);
+}
+
+/** タイトル照合用の正規化（空白・句読点・括弧類を落として比べる）。 */
+function normalizeTitleText(s) {
+  return String(s || '').replace(/[\s　、。・,，.．「」『』【】［］()（）<>＜＞:：;；!！?？'"“”‘’|｜/／\-―]/g, '');
+}
+
+/**
+ * 行が記事タイトルそのもの（またはタイトル＋配信日時だけの見出し行）かどうか。
+ * 時事・Yahoo!ピックアップでは本文先頭にタイトルがそのまま再掲される。
+ */
+function isTitleDupLine(line, title) {
+  const t = String(title || '').trim();
+  if (t.length < 6) return false;
+  if (normalizeTitleText(line) === normalizeTitleText(t)) return true;
+  // タイトル＋「11/14(土) 23:01」形式の日時だけが続く行
+  const squash = (s) => s.replace(/[\s　]+/g, '');
+  const ls = squash(line);
+  const ts = squash(t);
+  if (ls.length > ts.length && ls.startsWith(ts)) {
+    if (/^\d{1,2}\/\d{1,2}\([月火水木金土日]\)\d{1,2}:\d{2}/.test(ls.slice(ts.length))) return true;
+  }
+  return false;
+}
+
+/** 先頭3行までの範囲で、タイトル重複行を落とす（本文中盤の再掲は対象にしない）。 */
+function dropTitleDupLines(blocks, title) {
+  if (!title) return;
+  let seen = 0;
+  for (const block of blocks) {
+    for (let i = 0; i < block.length && seen < 3; i++, seen++) {
+      if (isTitleDupLine(block[i], title)) { block.splice(i, 1); i--; seen--; }
+    }
+    if (seen >= 3) break;
+  }
+}
+
+/**
+ * 見出し的な行か（末尾の他記事見出しリストの判定用）。新聞の本文段落はほぼ必ず
+ * 「。」で終わる（引用で終わる段落も文なので同様）ため、「文で終わらない短めの行」を
+ * 見出しとみなす。途中に「。」を含む断片（団体紹介文など）も見出し側に倒すため、
+ * 判定は文末で行う。写真キャプション等の正当な行は通常は文で終わるか、
+ * 末尾に3行以上は連ならない。
+ */
+function isHeadlineLikeLine(line) {
+  const t = line.trim();
+  if (t.length < 8 || t.length > 110) return false;
+  if (/[。．]$/.test(t)) return false; // 文で終わる行は本文
+  if (/」$/.test(t) && t.includes('。')) return false; // 引用文で終わる段落も本文
+  // 文の連なりの末尾が「…」等で切れた行（最後の「。」の後ろが短い）は本文とみなす。
+  // 逆に、団体紹介文のような断片は最後の「。」の後ろに長い続きがある。
+  const lastPeriod = Math.max(t.lastIndexOf('。'), t.lastIndexOf('．'));
+  if (lastPeriod >= 0 && t.length - lastPeriod - 1 < 15) return false;
+  return true;
+}
+
+/**
+ * 本文末尾に連なる他記事見出しの行（3行以上）を落とす。関連・おすすめ記事の
+ * 見出しリストは媒体を問わず本文の後ろに付く。誤爆防止のため、落とした後に
+ * 「。」を含む行（実文）が残る場合に限って適用する。あわせて、見出しリストの
+ * 直前に単独行で残る投票ウィジェットの設問（「…は何ですか？」）も一緒に落とす。
+ */
+function trimTailHeadlineRun(blocks) {
+  let run = 0;
+  outer: for (let bi = blocks.length - 1; bi >= 0; bi--) {
+    const block = blocks[bi];
+    for (let li = block.length - 1; li >= 0; li--) {
+      if (isHeadlineLikeLine(block[li])) run++;
+      else break outer;
+    }
+  }
+  if (run < 3) return;
+  let restLines = 0;
+  let restHasSentence = false;
+  let total = 0;
+  for (const b of blocks) total += b.length;
+  restLines = total - run;
+  if (restLines < 1) return;
+  let idx = 0;
+  for (const b of blocks) {
+    for (const line of b) {
+      if (idx < restLines && line.includes('。')) restHasSentence = true;
+      idx++;
+    }
+  }
+  if (!restHasSentence) return;
+  let toRemove = run;
+  for (let bi = blocks.length - 1; bi >= 0 && toRemove > 0; bi--) {
+    const block = blocks[bi];
+    const take = Math.min(block.length, toRemove);
+    block.splice(block.length - take, take);
+    toRemove -= take;
+  }
+  // 見出しリストの直前に残った単独ブロックの質問行（投票ウィジェットの設問）
+  for (let bi = blocks.length - 1; bi >= 0; bi--) {
+    const block = blocks[bi];
+    if (!block.length) continue;
+    if (block.length === 1) {
+      const t = block[0].trim();
+      if (t.length < 50 && !t.includes('。') && /[？?]$/.test(t)) block.splice(0, 1);
+    }
+    break;
+  }
+}
+
 /**
  * 抽出済み本文テキストからノイズ行を取り除く（保存済み本文への後がけにも使う）。
  * 段落構造（空行区切り）は保持する: 段落ブロック単位で処理し、ブロック内の
  * ノイズ行だけを落とす。連続する重複行も落とす。判定は isNoiseLine に集約する。
+ * title を渡すと、先頭にある記事タイトルの重複行も落とす（任意）。
+ * ブロック単位では著者プロフィール段落の除外と、末尾の他記事見出しリストの
+ * 除去（trimTailHeadlineRun）も行う。
  */
-export function filterBodyLines(text) {
+export function filterBodyLines(text, title = '') {
   const blocks = [];
   for (const block of String(text || '').split(/\n{2,}/)) {
+    if (isProfileBlock(block)) continue;
     const lines = [];
     for (const line of block.split('\n')) {
       const t = line.trim();
@@ -343,13 +492,24 @@ export function filterBodyLines(text) {
       if (lines[lines.length - 1] === t) continue;
       lines.push(t);
     }
-    if (lines.length) blocks.push(lines.join('\n'));
+    if (lines.length) blocks.push(lines);
   }
-  return blocks.join('\n\n');
+  dropTitleDupLines(blocks, title);
+  trimTailHeadlineRun(blocks);
+  // タイトル行の除去で新たに隣接した重複行も落とす（後がけの冪等性を保つ）
+  for (const block of blocks) {
+    for (let i = block.length - 1; i > 0; i--) {
+      if (block[i] === block[i - 1]) block.splice(i, 1);
+    }
+  }
+  return blocks.filter((b) => b.length).map((b) => b.join('\n')).join('\n\n');
 }
 
-/** HTMLから本文らしき <p> テキストを連結する（ナビ・広告等の定型ブロックは除去）。 */
-export function extractBody(html) {
+/**
+ * HTMLから本文らしき <p> テキストを連結する（ナビ・広告等の定型ブロックは除去）。
+ * title を渡すと、先頭にある記事タイトルの重複行も落とす（任意）。
+ */
+export function extractBody(html, title = '') {
   let h = String(html || '');
   h = h
     .replace(/<script[\s\S]*?<\/script>/gi, ' ')
@@ -374,14 +534,14 @@ export function extractBody(html) {
     const raw = collect(h);
     if (raw.length >= 200 && text.length < raw.length * 0.2) text = raw;
   }
-  return filterBodyLines(text).slice(0, 20000);
+  return filterBodyLines(text, title).slice(0, 20000);
 }
 
 /**
  * ページを取得し、本文テキストと og:image、記者署名をまとめて返す（取れなければ各々 ''）。
  * リダイレクトは手動でたどり、各ホップでSSRFチェックを行う。
  */
-async function fetchPage(fetchImpl, url, timeoutMs = TIMEOUT_MS) {
+async function fetchPage(fetchImpl, url, timeoutMs = TIMEOUT_MS, title = '') {
   const empty = { text: '', imageUrl: '', author: '' };
   let current = url;
   for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
@@ -408,7 +568,7 @@ async function fetchPage(fetchImpl, url, timeoutMs = TIMEOUT_MS) {
       const ct = res.headers?.get?.('content-type') || '';
       if (ct && !/html|xml/i.test(ct)) return empty;
       const html = await res.text();
-      const text = extractBody(html);
+      const text = extractBody(html, title);
       return { text, imageUrl: extractOgImage(html, current), author: extractAuthor(html, text) };
     } catch {
       return empty;
@@ -483,7 +643,8 @@ async function fetchArticleBody(db, article, clusterArticles, ctx) {
     let imageUrl = '';
     let author = cand.altArticle?.author || '';
     if (!text) {
-      const page = await fetchPage(ctx.fetchImpl, cand.url);
+      // タイトル重複行の除去のため、取得ページに対応する記事のタイトルを渡す
+      const page = await fetchPage(ctx.fetchImpl, cand.url, TIMEOUT_MS, cand.altArticle ? cand.altArticle.title : article.title);
       text = page.text;
       imageUrl = page.imageUrl;
       author = page.author;
