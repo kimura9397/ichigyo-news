@@ -21,9 +21,9 @@ test('サーバー: 収集の開始は startRefresh に一本化され、実行�
     server.includes('if (refreshing) return { promise: refreshing, started: false }'),
     '実行中は開始せず started: false を返す分岐がありません',
   );
-  // 収集本体 refresh(db) の呼び出しは startRefresh の中だけ（迂回経路を作らない）
-  const calls = server.split('refresh(db)').length - 1;
-  assert.equal(calls, 1, 'refresh(db) の呼び出しが startRefresh 以外にあります');
+  // 収集本体 refresh(db, ...) の呼び出しは startRefresh の中だけ（迂回経路を作らない）
+  const calls = server.split('refresh(db').length - 1;
+  assert.equal(calls, 1, 'refresh(db, ...) の呼び出しが startRefresh 以外にあります');
 });
 
 test('サーバー: POST /api/refresh は実行中なら alreadyRunning で現在の状態を返す', () => {

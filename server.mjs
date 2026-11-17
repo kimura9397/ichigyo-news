@@ -66,7 +66,7 @@ let refreshing = null;
  */
 function startRefresh() {
   if (refreshing) return { promise: refreshing, started: false };
-  refreshing = refresh(db)
+  refreshing = refresh(db, { nextRunScheduled: pollState.enabled })
     .then((r) => { kickEditorialBatch(); return r; })
     .catch((e) => { console.error('refresh failed:', e); return null; })
     .finally(() => { refreshing = null; });
