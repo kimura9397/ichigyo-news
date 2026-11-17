@@ -78,6 +78,47 @@ function doRefresh() {
   return startRefresh().promise;
 }
 
+/* ---------- ポーリング（サーバー側スケジューリング、2026-11-17 ユーザー承認） ---------- */
+// ポーリングのタイマーはサーバープロセス側で持つ。タブ側のタイマーだと、他の
+// タブへ切り替えた際のタイマー絞りで間隔がずれたり、タブを閉じると収集が
+// 止まってしまうため。状態はメモリ保持のみで、サーバー再起動で OFF に戻る。
+// 本体が起動している間だけ回るので、「開いた時だけ取得・運用コスト0」の
+// 原則は維持される。設定項目は増やさず、既存のトグル＋間隔（2/5/10分）の
+// 裏側だけを移した。
+const POLL_INTERVAL_MINUTES = [2, 5, 10];
+const pollState = { enabled: false, minutes: 5, nextAt: null };
+let pollTimer = null;
+
+function pollingStatus() {
+  return { enabled: pollState.enabled, minutes: pollState.minutes, nextAt: pollState.nextAt };
+}
+
+function schedulePoll() {
+  if (pollTimer) {
+    clearTimeout(pollTimer);
+    pollTimer = null;
+  }
+  pollState.nextAt = null;
+  if (!pollState.enabled) return;
+  const intervalMs = pollState.minutes * 60 * 1000;
+  pollState.nextAt = Date.now() + intervalMs;
+  pollTimer = setTimeout(() => {
+    // 収集は単一飛行の startRefresh に相乗りする（実行中ならその回は見送る）
+    startRefresh();
+    schedulePoll();
+  }, intervalMs);
+  pollTimer.unref?.();
+}
+
+/** ポーリング状態を変更し、変更後の状態を返す。minutes が不正なら null。 */
+function setPolling(enabled, minutes) {
+  if (minutes !== undefined && !POLL_INTERVAL_MINUTES.includes(minutes)) return null;
+  if (minutes !== undefined) pollState.minutes = minutes;
+  if (enabled !== undefined) pollState.enabled = Boolean(enabled);
+  schedulePoll();
+  return pollingStatus();
+}
+
 // 背景社説チェック: refresh 完了後、重要タブ上位クラスタの社説を裏で確認する（refresh はブロックしない）
 let editorialBatchRunning = false;
 function kickEditorialBatch() {
@@ -261,6 +302,7 @@ async function apiStories(url) {
     offset,
     refreshing: kicked || refreshing !== null,
     lastRun: lastFinishedRun(),
+    polling: pollingStatus(),
     categories: categoryCounts(tab, muted, keywords),
   };
 }
@@ -412,9 +454,17 @@ const server = createServer(async (req, res) => {
       db.exec('VACUUM');
       return sendJson(res, 200, { pruned_clusters: prunedClusters, folded_reads: foldedReads, purged_body_data: purgedBodyData, split_clusters: splitClusters, split_foreign_versions: splitForeign, folded_numeric_versions: foldedNumericVersions, refreshed_search_text: refreshedSearchText, reevaluated_editorials: reevaluatedEditorials, before_bytes: before, after_bytes: dbBytes() });
     }
+    if (p === '/api/polling' && req.method === 'POST') {
+      const body = await readJsonBody(req);
+      const minutes = body.minutes === undefined ? undefined : Number(body.minutes);
+      const enabled = body.enabled === undefined ? undefined : body.enabled === true;
+      const polling = setPolling(enabled, minutes);
+      if (!polling) return sendJson(res, 400, { error: 'invalid minutes', polling: pollingStatus() });
+      return sendJson(res, 200, { polling });
+    }
     if (p === '/api/status' && req.method === 'GET') {
       const counts = db.prepare('SELECT (SELECT COUNT(*) FROM clusters) AS clusters, (SELECT COUNT(*) FROM versions) AS versions, (SELECT COUNT(*) FROM articles) AS articles').get();
-      return sendJson(res, 200, { lastRun: lastFinishedRun(), counts, refreshing: refreshing !== null, db_bytes: dbBytes() });
+      return sendJson(res, 200, { lastRun: lastFinishedRun(), counts, refreshing: refreshing !== null, db_bytes: dbBytes(), polling: pollingStatus() });
     }
     // 静的配信: デコード＋正規化し、public/ 配下から出るパスは拒否する
     let rel;

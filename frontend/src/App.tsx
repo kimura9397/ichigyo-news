@@ -17,6 +17,7 @@ import {
   fetchDbStatus,
   fetchEditorials,
   fetchKeywords,
+  fetchServerStatus,
   fetchTabRows,
   formatWhen,
   postReadEvent,
@@ -24,7 +25,9 @@ import {
   removeBookmark,
   removeKeywordRemote,
   runMaintenance,
+  setPollingRemote,
   versionsOfEvent,
+  type PollingState,
 } from './api'
 import type { CoverageKind, FeedTab, StoryRow } from './types'
 import Spotlight from './Spotlight'
@@ -535,22 +538,11 @@ function App() {
   }
 
   // ポーリング（横ディスプレイ常駐表示用、2026-11-15 ユーザー承認）。
-  // ON/OFF と間隔は localStorage に保存し、リロード後も復元する。
-  const [polling, setPolling] = useState<boolean>(() => {
-    try {
-      return localStorage.getItem('ichigyo:polling') === '1'
-    } catch {
-      return false
-    }
-  })
-  const [pollMinutes, setPollMinutes] = useState<number>(() => {
-    try {
-      const v = Number(localStorage.getItem('ichigyo:pollMinutes'))
-      return POLL_INTERVALS.includes(v) ? v : 5
-    } catch {
-      return 5
-    }
-  })
+  // スケジューリングはサーバー側（2026-11-17 移行）: 状態の正はサーバーで、
+  // このタブはサーバーと同期して表示・残り時間バー・収集完了の検知だけを行う。
+  // タブを閉じても本体が起動している間は収集が続き、サーバー再起動で OFF に戻る。
+  const [polling, setPolling] = useState(false)
+  const [pollMinutes, setPollMinutes] = useState(5)
   /** 次回ポーリング更新までの残り割合（1→0）。残り時間バーに使う */
   const [pollProgress, setPollProgress] = useState(1)
   /** ポーリングで新しく現れたクラスタ（ハイライト対象） */
@@ -562,6 +554,8 @@ function App() {
   /** 重要タブの前回スナップショット（clusterId -> 最新の版番号） */
   const pollSnapshotRef = useRef<Map<number, number> | null>(null)
   const nextPollAtRef = useRef(0)
+  /** 最後に反映済みの fetch_runs.id（サーバー側収集の完了検知に使う） */
+  const lastRunIdRef = useRef<number | null>(null)
   const wakeLockRef = useRef<{ release: () => void } | null>(null)
 
   // 全画面表示（横ディスプレイ常駐表示用、2026-11-16 ユーザー承認）。
@@ -612,21 +606,36 @@ function App() {
     }
   }, [spotlightSeconds])
 
-  useEffect(() => {
-    try {
-      localStorage.setItem('ichigyo:polling', polling ? '1' : '0')
-    } catch {
-      /* 保存できなくても動作は続ける */
-    }
-  }, [polling])
+  /** サーバー側のポーリング状態をこのタブの表示へ反映する（状態の正はサーバー）。 */
+  const applyServerPolling = useCallback((p: PollingState) => {
+    setPolling(p.enabled)
+    setPollMinutes(p.minutes)
+    nextPollAtRef.current = p.nextAt ?? 0
+  }, [])
 
-  useEffect(() => {
-    try {
-      localStorage.setItem('ichigyo:pollMinutes', String(pollMinutes))
-    } catch {
-      /* 同上 */
-    }
-  }, [pollMinutes])
+  /** ポーリングの ON/OFF と間隔をサーバーへ設定する（既存UIの裏側だけを移した）。 */
+  const applyPolling = useCallback(
+    async (enabled: boolean, minutes: number) => {
+      try {
+        applyServerPolling(await setPollingRemote(enabled, minutes))
+      } catch {
+        /* 失敗したらサーバーの現在値に同期し直す（表示と実状態をずらさない） */
+        fetchServerStatus()
+          .then((s) => applyServerPolling(s.polling))
+          .catch(() => {})
+      }
+    },
+    [applyServerPolling],
+  )
+
+  /** 自前で完了を扱った収集を「反映済み」として記録する（状態同期側の二重反映を防ぐ）。 */
+  const markRunReflected = useCallback(() => {
+    fetchServerStatus()
+      .then((s) => {
+        lastRunIdRef.current = s.lastRunId
+      })
+      .catch(() => {})
+  }, [])
 
   // 未確認件数をタブタイトルに出す
   useEffect(() => {
@@ -640,11 +649,17 @@ function App() {
     setHighlightClusters(new Set())
   }, [])
 
-  // DB容量の表示（マストヘッド片隅）。失敗しても画面は止めない
+  // DB容量の表示（マストヘッド片隅）と、サーバー側ポーリング状態の初期同期。
+  // 失敗しても画面は止めない
   useEffect(() => {
-    fetchDbStatus()
-      .then((s) => setDbBytes(s.dbBytes))
+    fetchServerStatus()
+      .then((s) => {
+        setDbBytes(s.dbBytes)
+        applyServerPolling(s.polling)
+        if (lastRunIdRef.current === null) lastRunIdRef.current = s.lastRunId
+      })
       .catch(() => {})
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   /** ブックマーク件数だけを軽く取り直す（limit=1 で total のみ使う）。 */
@@ -746,6 +761,10 @@ function App() {
         })
         setCatCounts((prev) => ({ ...prev, [target]: result.categories }))
         if (result.refreshing) setBgRefreshing(true)
+        // 一覧レスポンスに付いてくる次回ポーリング予定で残り時間バーを寄せておく
+        if (result.polling?.nextAt != null) {
+          nextPollAtRef.current = result.polling.nextAt
+        }
         setLoadError(null)
         return result
       } catch {
@@ -776,6 +795,9 @@ function App() {
       if (!result?.refreshing || tries >= 15) {
         setBgRefreshing(false)
         setRefreshGen((g) => g + 1)
+        // この収集はここで反映済みにする（ポーリングの状態同期が同じ収集を
+        // 検知して二重に組み直ししないように）
+        markRunReflected()
         clearInterval(timer)
       }
     }, 3000)
@@ -786,14 +808,10 @@ function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [bgRefreshing])
 
-  // ポーリング1回分: サーバー側の再取得を依頼し、表示中の一覧を取り直してから、
-  // 重要タブを前回スナップショットと比較し、新規クラスタと版が増えたクラスタを検出する
-  const pollTick = useCallback(async () => {
-    try {
-      await refreshFeed()
-    } catch {
-      /* 失敗しても次の周期で再試行する */
-    }
+  // サーバー側で収集が完了したときの反映: 表示中の一覧を取り直してから、
+  // 重要タブを前回スナップショットと比較し、新規クラスタと版が増えたクラスタを検出する。
+  // refreshGen の増加がスポットライトの組み直し（1件目から流し直す）の契機になる
+  const reflectServerRefresh = useCallback(async () => {
     await loadPage(tab, category, 0, false)
     setRefreshGen((g) => g + 1)
     try {
@@ -824,7 +842,9 @@ function App() {
     }
   }, [tab, category, loadPage])
 
-  // ポーリングのタイマーと残り時間バーの進行
+  // ポーリングの状態同期と残り時間バーの進行。スケジューリング自体はサーバー側で、
+  // このタブは一定間隔で /api/status を見て次回予定を取り直し、収集の完了
+  // （fetch_runs の進行）を検知して一覧へ反映する。タブ側で収集は開始しない
   useEffect(() => {
     if (!polling) {
       pollSnapshotRef.current = null
@@ -843,21 +863,39 @@ function App() {
         })
         .catch(() => {})
     }
-    const intervalMs = pollMinutes * 60 * 1000
-    nextPollAtRef.current = Date.now() + intervalMs
-    const tickTimer = setInterval(() => {
-      nextPollAtRef.current = Date.now() + intervalMs
-      void pollTick()
-    }, intervalMs)
+    let cancelled = false
+    const sync = async () => {
+      try {
+        const s = await fetchServerStatus()
+        if (cancelled) return
+        applyServerPolling(s.polling)
+        if (!s.polling.enabled || s.lastRunId === null) return
+        if (lastRunIdRef.current === null) {
+          // 初回同期は基準作りのみ（既存の収集を「完了した」と扱わない）
+          lastRunIdRef.current = s.lastRunId
+        } else if (s.lastRunId !== lastRunIdRef.current) {
+          lastRunIdRef.current = s.lastRunId
+          await reflectServerRefresh()
+        }
+      } catch {
+        /* 失敗しても次の周期で再試行する */
+      }
+    }
+    void sync()
+    const syncTimer = setInterval(() => void sync(), 10000)
     const progressTimer = setInterval(() => {
-      const remain = Math.max(0, nextPollAtRef.current - Date.now())
-      setPollProgress(Math.min(1, remain / intervalMs))
+      const intervalMs = pollMinutes * 60 * 1000
+      let remain = nextPollAtRef.current - Date.now()
+      // 同期前に予定時刻を過ぎていたら、周期分だけ繰り上げて見積もる
+      if (remain < 0) remain = intervalMs - (Math.abs(remain) % intervalMs)
+      setPollProgress(Math.min(1, Math.max(0, remain) / intervalMs))
     }, 250)
     return () => {
-      clearInterval(tickTimer)
+      cancelled = true
+      clearInterval(syncTimer)
       clearInterval(progressTimer)
     }
-  }, [polling, pollMinutes, pollTick])
+  }, [polling, pollMinutes, reflectServerRefresh, applyServerPolling])
 
   // ポーリング中は画面スリープを防ぐ（Wake Lock、対応環境のみ）
   useEffect(() => {
@@ -1113,6 +1151,8 @@ function App() {
       goToListPane()
       await loadPage(tab, category, 0, false)
       setRefreshGen((g) => g + 1)
+      // この収集はここで反映済みにする（ポーリングの状態同期側の二重反映を防ぐ）
+      markRunReflected()
       fetchDbStatus()
         .then((s) => setDbBytes(s.dbBytes))
         .catch(() => {})
@@ -1171,7 +1211,7 @@ function App() {
                 className="switch"
                 role="switch"
                 aria-checked={polling}
-                onClick={() => setPolling((v) => !v)}
+                onClick={() => void applyPolling(!polling, pollMinutes)}
                 title="ポーリング（一定間隔で自動更新）"
               >
                 <span className="switch-track">
@@ -1190,7 +1230,7 @@ function App() {
                       key={m}
                       type="button"
                       className={pollMinutes === m ? 'seg is-active' : 'seg'}
-                      onClick={() => setPollMinutes(m)}
+                      onClick={() => void applyPolling(polling, m)}
                       aria-pressed={pollMinutes === m}
                     >
                       {m}分

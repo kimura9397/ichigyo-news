@@ -76,6 +76,8 @@ export interface StoriesPage {
   refreshing: boolean
   /** 現在のタブ条件でのカテゴリ別件数 */
   categories: { category: string; count: number }[]
+  /** サーバー側ポーリングの現在状態（一覧レスポンスにも付いてくる） */
+  polling: PollingState | null
 }
 
 /** 社説1件（確認できた紙のみ）。coverages へ流し込む形。 */
@@ -455,12 +457,14 @@ export async function fetchTabRows(
     total: number
     refreshing: boolean
     categories: { category: string; count: number }[]
+    polling?: RawPolling
   }>(`/api/stories?${params}`)
   return {
     rows: data.stories.map(rowFromListItem),
     total: data.total,
     refreshing: data.refreshing,
     categories: data.categories ?? [],
+    polling: data.polling ? pollingFromRaw(data.polling) : null,
   }
 }
 
@@ -492,6 +496,70 @@ export async function refreshFeed(): Promise<{ alreadyRunning: boolean }> {
     method: 'POST',
   })
   return { alreadyRunning: data.alreadyRunning === true }
+}
+
+/* ---------- ポーリング（サーバー側スケジューリング、2026-11-17 移行） ---------- */
+
+/** サーバー側ポーリングの状態。スケジューリングの正はサーバーで、タブは表示と完了検知だけを行う。 */
+export interface PollingState {
+  enabled: boolean
+  /** 間隔（分） */
+  minutes: number
+  /** 次回実行予定（epoch ミリ秒）。無効時は null */
+  nextAt: number | null
+}
+
+interface RawPolling {
+  enabled?: boolean
+  minutes?: number
+  nextAt?: number | null
+}
+
+function pollingFromRaw(raw: RawPolling | undefined): PollingState {
+  return {
+    enabled: raw?.enabled === true,
+    minutes: typeof raw?.minutes === 'number' ? raw.minutes : 5,
+    nextAt: typeof raw?.nextAt === 'number' ? raw.nextAt : null,
+  }
+}
+
+export interface ServerStatus {
+  dbBytes: number
+  refreshing: boolean
+  /** 最後に完了した収集の fetch_runs.id（収集完了の検知に使う）。なければ null */
+  lastRunId: number | null
+  lastRunFinishedAt: string | null
+  polling: PollingState
+}
+
+/** サーバーのステータス（DB容量・収集中か・最終収集・ポーリング状態）を取得する。 */
+export async function fetchServerStatus(): Promise<ServerStatus> {
+  const data = await fetchJson<{
+    db_bytes?: number
+    refreshing?: boolean
+    lastRun?: { id?: number; finished_at?: string } | null
+    polling?: RawPolling
+  }>('/api/status')
+  return {
+    dbBytes: data.db_bytes ?? 0,
+    refreshing: data.refreshing === true,
+    lastRunId: typeof data.lastRun?.id === 'number' ? data.lastRun.id : null,
+    lastRunFinishedAt: data.lastRun?.finished_at ?? null,
+    polling: pollingFromRaw(data.polling),
+  }
+}
+
+/** ポーリングの ON/OFF と間隔をサーバーへ設定し、設定後の状態を返す。 */
+export async function setPollingRemote(
+  enabled: boolean,
+  minutes: number,
+): Promise<PollingState> {
+  const data = await fetchJson<{ polling?: RawPolling }>('/api/polling', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ enabled, minutes }),
+  })
+  return pollingFromRaw(data.polling)
 }
 
 /* ---------- ブックマーク・閲覧ログ・DB保守 ---------- */
