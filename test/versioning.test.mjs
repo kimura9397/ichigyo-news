@@ -14,23 +14,29 @@ function counts(db) {
   };
 }
 
+// 日付は実行時点からの相対にする。固定日付だと、クラスタ照合の直近3日ウィンドウ
+// （CLUSTER_WINDOW_MS）と取り込み時刻（実時間）の差が広がり、時間経過で壊れる
+// （2026-11-14 固定で実際に壊れた）。相対間隔は元の固定日付の並び
+// （初報 → 1時間後に他紙 → 4時間後に続報）を保つ。
+const hoursAgo = (h) => new Date(Date.now() - h * 3600000).toISOString();
+
 const v1Asahi = {
   title: '市内で火災が発生 けが人なし',
   url: 'https://example.com/a1', source: '朝日',
   summary: '市内で火災が発生し、けが人はなかった。',
-  publishedAt: '2026-11-14T01:00:00.000Z',
+  publishedAt: hoursAgo(5),
 };
 const sameYomiuri = {
   title: '市内で火災、けが人なし',
   url: 'https://example.com/y1', source: '読売',
   summary: '市内で火災があり、けが人はなかった。',
-  publishedAt: '2026-11-14T02:00:00.000Z',
+  publishedAt: hoursAgo(4),
 };
 const followUp = {
   title: '市内で火災が発生 死者2人が確認される',
   url: 'https://example.com/a2', source: '朝日',
   summary: '市内で発生した火災で、死者2人が確認された。',
-  publishedAt: '2026-11-14T05:00:00.000Z',
+  publishedAt: hoursAgo(1),
 };
 
 test('初報は v1 の1クラスタ・1バージョンになる', () => {
@@ -101,7 +107,7 @@ test('全く別のニュースは別クラスタになる', () => {
     title: '株価が大幅に上昇し日経平均が最高値を更新',
     url: 'https://example.com/k1', source: '日経',
     summary: '日経平均株価が最高値を更新した。',
-    publishedAt: '2026-11-14T03:00:00.000Z',
+    publishedAt: hoursAgo(3),
   }]);
   assert.equal(counts(db).clusters, 2);
 });
