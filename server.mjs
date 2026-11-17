@@ -176,7 +176,10 @@ function tabOrder(tab) {
   // ここで時間減衰を掛けると二重適用になる。並びはスコアのみ。
   if (tab === 'important' || tab === 'editorials') return 'c.importance_score DESC, latest_published DESC, v.version_no DESC';
   if (tab === 'bookmarks') return '(SELECT b.created_at FROM bookmarks b WHERE b.cluster_id = c.id) DESC, v.version_no DESC';
-  if (tab === 'new') return 'v.created_at DESC, v.version_no DESC';
+  // 新着は発表時刻（その版の最新記事の published_at）順を主キーにする（2026-11-17
+  // ユーザー承認）。検知時刻順だと、一括検知したバッチ内がフィード処理順になり
+  // 発表時刻が前後して見えるため。発表時刻が無い版は検知時刻で並べる。
+  if (tab === 'new') return 'COALESCE(latest_published, v.created_at) DESC, v.created_at DESC, v.version_no DESC';
   return 'c.last_seen_at DESC, v.version_no DESC';
 }
 
