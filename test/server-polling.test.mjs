@@ -1,6 +1,8 @@
 // ポーリングのサーバー側スケジューリング（2026-11-17 移行）の統合テスト。
-// - 状態はサーバー側メモリ保持: 初期は OFF、POST /api/polling で変更でき、
-//   GET /api/status と GET /api/stories の両方に次回実行予定（nextAt）が載る
+// - 状態はサーバー側で DB に保存され、再起動時に復元される（有効なら
+//   スケジュールも再開）。保存が無ければ初期は OFF。POST /api/polling で
+//   変更でき、GET /api/status と GET /api/stories の両方に次回実行予定
+//   （nextAt）が載る
 // - 間隔は既存の 2/5/10 分のみ。それ以外は 400
 // - フロントはタブ側タイマーで収集を開始せず、サーバー状態の設定と同期だけを行う
 import { test, before, after } from 'node:test';
@@ -130,6 +132,24 @@ test('無効化すると nextAt が null に戻る', async () => {
   const s = await status();
   assert.equal(s.polling.enabled, false);
   assert.equal(s.polling.nextAt, null);
+});
+
+test('サーバー再起動でポーリング状態が復元され、スケジュールが再開する', async () => {
+  const res = await postPolling({ enabled: true, minutes: 10 });
+  assert.equal(res.status, 200);
+  proc.kill('SIGKILL');
+  await new Promise((r) => proc.once('exit', r));
+  proc = spawn('node', ['server.mjs'], {
+    cwd: ROOT,
+    env: { ...process.env, PORT: String(PORT), HOST: '127.0.0.1', NEWS_DB_PATH: join(dir, 'news.db') },
+    stdio: 'ignore',
+  });
+  await waitReady();
+  const s = await status();
+  assert.equal(s.polling.enabled, true, '有効状態が復元される');
+  assert.equal(s.polling.minutes, 10, '間隔が復元される');
+  assert.ok(typeof s.polling.nextAt === 'number', 'スケジュールが再開し nextAt が立つ');
+  assert.ok(s.polling.nextAt > Date.now(), 'nextAt は未来に立つ');
 });
 
 test('サーバー: タイマーは単一飛行の startRefresh に相乗りする', () => {

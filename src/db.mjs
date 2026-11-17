@@ -72,6 +72,11 @@ CREATE TABLE IF NOT EXISTS read_events (
   opened_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_read_events_opened ON read_events(opened_at);
+-- サーバー側の設定（key-value）: ポーリング状態（有効/無効・間隔）の永続化に使う（2026-11-17）
+CREATE TABLE IF NOT EXISTS app_settings (
+  key TEXT PRIMARY KEY,
+  value TEXT NOT NULL
+);
 -- 閲覧の日次集計（日付×カテゴリ×開封数）: 無期限保持
 CREATE TABLE IF NOT EXISTS read_daily (
   date TEXT NOT NULL,

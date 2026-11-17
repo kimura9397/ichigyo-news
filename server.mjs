@@ -81,11 +81,13 @@ function doRefresh() {
 /* ---------- ポーリング（サーバー側スケジューリング、2026-11-17 ユーザー承認） ---------- */
 // ポーリングのタイマーはサーバープロセス側で持つ。タブ側のタイマーだと、他の
 // タブへ切り替えた際のタイマー絞りで間隔がずれたり、タブを閉じると収集が
-// 止まってしまうため。状態はメモリ保持のみで、サーバー再起動で OFF に戻る。
+// 止まってしまうため。状態は DB（app_settings）に保存し、サーバー再起動時に
+// 復元する（有効だった場合はスケジュールも再開する、2026-11-17 永続化）。
 // 本体が起動している間だけ回るので、「開いた時だけ取得・運用コスト0」の
 // 原則は維持される。設定項目は増やさず、既存のトグル＋間隔（2/5/10分）の
 // 裏側だけを移した。
 const POLL_INTERVAL_MINUTES = [2, 5, 10];
+const POLLING_SETTING_KEY = 'polling_state';
 const pollState = { enabled: false, minutes: 5, nextAt: null };
 let pollTimer = null;
 
@@ -115,9 +117,30 @@ function setPolling(enabled, minutes) {
   if (minutes !== undefined && !POLL_INTERVAL_MINUTES.includes(minutes)) return null;
   if (minutes !== undefined) pollState.minutes = minutes;
   if (enabled !== undefined) pollState.enabled = Boolean(enabled);
+  savePolling();
   schedulePoll();
   return pollingStatus();
 }
+
+/** ポーリング状態を DB に保存する（再起動時に復元するため）。 */
+function savePolling() {
+  db.prepare('INSERT INTO app_settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value')
+    .run(POLLING_SETTING_KEY, JSON.stringify({ enabled: pollState.enabled, minutes: pollState.minutes }));
+}
+
+/** 起動時にポーリング状態を DB から復元し、有効だった場合はスケジュールを再開する。 */
+function restorePolling() {
+  try {
+    const row = db.prepare('SELECT value FROM app_settings WHERE key = ?').get(POLLING_SETTING_KEY);
+    if (row) {
+      const saved = JSON.parse(row.value);
+      if (POLL_INTERVAL_MINUTES.includes(saved.minutes)) pollState.minutes = saved.minutes;
+      pollState.enabled = Boolean(saved.enabled);
+    }
+  } catch { /* 保存値が読めなくても既定（OFF・5分）で起動する */ }
+  schedulePoll();
+}
+restorePolling();
 
 // 背景社説チェック: refresh 完了後、重要タブ上位クラスタの社説を裏で確認する（refresh はブロックしない）
 let editorialBatchRunning = false;
