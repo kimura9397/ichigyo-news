@@ -837,22 +837,98 @@ return { seen: items.length, inserted };
 // ---------- フィード取得 ----------
 
 /**
+ * ホスト単位の取得スロットル（2026-11-17 429対策。本命は「踏まないこと」）。
+ * 1回の更新では Google News だけで通常フィード15本＋キーワード分（最大20本）が
+ * 同一ホストに集中する。同時実行を絞り開始間隔も空けて、バーストを作らない。
+ * 状態はプロセス内メモリのみ（ホスト名→実行数・最終開始時刻・待ち行列）。
+ */
+export const HOST_MAX_CONCURRENT = 2;
+export const HOST_MIN_INTERVAL_MS = 200;
+const hostStates = new Map();
+function hostState(host) {
+let s = hostStates.get(host);
+if (!s) {
+s = { running: 0, lastStart: 0, queue: [] };
+hostStates.set(host, s);
+}
+return s;
+}
+const sleepMs = (ms) => new Promise((r) => setTimeout(r, ms));
+
+async function withHostSlot(host, fn) {
+if (!host) return fn();
+const s = hostState(host);
+if (s.running >= HOST_MAX_CONCURRENT || s.queue.length > 0) {
+await new Promise((resolve) => s.queue.push(resolve));
+}
+s.running++;
+try {
+// 開始時刻は待つ前に予約する（lastStart を先に進める）。待機中の取得が
+// lastStart を更新しないと、後から起きた取得が同じ時刻に重なって開始し、
+// ペアでバーストになるため。
+const nowMs = Date.now();
+const startAt = Math.max(nowMs, s.lastStart + HOST_MIN_INTERVAL_MS);
+s.lastStart = startAt;
+if (startAt > nowMs) await sleepMs(startAt - nowMs);
+return await fn();
+} finally {
+s.running--;
+const next = s.queue.shift();
+if (next) next();
+}
+}
+
+/**
+ * 429 の Retry-After から待機ミリ秒を決める（保険のリトライ用）。
+ * 秒指定と HTTP-date に対応し、ヘッダーが無ければ既定10秒。異常に長い指定で
+ * 更新全体を止めないよう、上限30秒で頭打ちにする。
+ */
+export const RETRY_AFTER_DEFAULT_MS = 10000;
+export const RETRY_AFTER_MAX_MS = 30000;
+export function retryAfterMs(res, nowMs = Date.now()) {
+const raw = res?.headers?.get?.('retry-after');
+if (raw) {
+const sec = Number(raw);
+if (Number.isFinite(sec)) return Math.min(Math.max(sec * 1000, 0), RETRY_AFTER_MAX_MS);
+const t = Date.parse(raw);
+if (Number.isFinite(t)) return Math.min(Math.max(t - nowMs, 0), RETRY_AFTER_MAX_MS);
+}
+return RETRY_AFTER_DEFAULT_MS;
+}
+
+/**
  * RSS テキストを取得する（通常フィードと社説検索の共用）。
  * タイムアウトは応答本文の読み取りが終わるまで解除しない。ヘッダーだけ返して
  * 止まる応答でも待ち続けず、FETCH_TIMEOUT_MS で打ち切る。
  * （社説側は以前 fetch 直後にタイマーを解除しており、2回目のコンプライアンス
  * チェック 2026-11-16 の指摘でこの形に統一した。）
+ * 取得はホスト単位のスロットル（withHostSlot）越しに行う。429 を受けた場合
+ * だけ、Retry-After（無ければ10秒）待って1回だけ再試行する（保険）。待機は
+ * スロットを保持したまま行い、その間に他リクエストが同じホストへ流れ込ま
+ * ないようにする。再試行でも失敗したら、その回はそのフィードを諦める。
  */
 async function fetchRssText(url, fetchImpl = fetch) {
+let host = '';
+try { host = new URL(url).host; } catch { /* ホストが読めない URL はスロットル対象外 */ }
+return withHostSlot(host, async () => {
+for (let attempt = 1; ; attempt++) {
 const ctrl = new AbortController();
 const timer = setTimeout(() => ctrl.abort(), FETCH_TIMEOUT_MS);
 try {
 const res = await fetchImpl(url, { signal: ctrl.signal, headers: { 'user-agent': 'news-app/0.1 (+personal use)' } });
+if (res.status === 429 && attempt === 1) {
+if (res.body && typeof res.body.cancel === 'function') res.body.cancel().catch(() => {});
+clearTimeout(timer);
+await sleepMs(retryAfterMs(res));
+continue;
+}
 if (!res.ok) throw new Error(`HTTP ${res.status}`);
 return await readResponseText(res);
 } finally {
 clearTimeout(timer);
 }
+}
+});
 }
 
 async function fetchFeed(feed, fetchImpl = fetch) {
