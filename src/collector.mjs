@@ -919,19 +919,21 @@ return chunks.slice(0, 2).join(' ');
 /**
 * 5大紙の社説をGoogleニュースRSS検索で探す。結果は editorials にキャッシュ。
 * 見つからない紙は found=0（UIで「確認できず」と表示）。捏造はしない。
+* now は checked_at と重要度再計算（importanceFor）の時間軸。呼び出し側の
+* 時間軸と揃えるため、実時間で再計算して窓外れの 0 に潰さないよう貫通させる。
 */
-export async function fetchEditorials(db, clusterId, { fetchImpl = fetch, force = false } = {}) {
+export async function fetchEditorials(db, clusterId, { fetchImpl = fetch, force = false, now = new Date() } = {}) {
 const cluster = db.prepare('SELECT * FROM clusters WHERE id = ?').get(clusterId);
 if (!cluster) return null;
 const cached = db.prepare('SELECT * FROM editorials WHERE cluster_id = ?').all(clusterId);
 if (!force && cached.length >= PAPERS.length) {
 // 社説ボーナス（D）が重要度に反映されるよう、キャッシュ済みでも再計算だけは行う
-db.prepare('UPDATE clusters SET importance_score = ? WHERE id = ?').run(importanceFor(db, clusterId), clusterId);
+db.prepare('UPDATE clusters SET importance_score = ? WHERE id = ?').run(importanceFor(db, clusterId, now), clusterId);
 return cached;
 }
 const terms = topicTerms(cluster.title);
 const clusterTitles = db.prepare('SELECT title FROM articles WHERE cluster_id = ? LIMIT 10').all(clusterId).map((r) => r.title);
-const nowIso = new Date().toISOString();
+const nowIso = now.toISOString();
 const results = [];
 for (const paper of PAPERS) {
 let found = null;
@@ -964,7 +966,7 @@ db.prepare('INSERT INTO editorials (cluster_id, paper, found, title, summary, ur
 results.push(row);
 }
 // 社説ボーナス（D）が重要度に反映されるよう、取得後に再計算する
-db.prepare('UPDATE clusters SET importance_score = ? WHERE id = ?').run(importanceFor(db, clusterId), clusterId);
+db.prepare('UPDATE clusters SET importance_score = ? WHERE id = ?').run(importanceFor(db, clusterId, now), clusterId);
 return results;
 }
 
@@ -1030,7 +1032,7 @@ export async function checkTopEditorials(db, { fetchImpl = fetch, now = new Date
       while (i < targets.length) {
         const t = targets[i++];
         try {
-          await fetchEditorials(db, t.id, { fetchImpl, force: t.force });
+          await fetchEditorials(db, t.id, { fetchImpl, force: t.force, now });
           checked++;
         } catch (e) {
           console.error('editorial batch failed for cluster', t.id, e);

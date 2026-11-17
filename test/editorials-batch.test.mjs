@@ -80,10 +80,14 @@ test('バッチ実行: 候補をチェックして社説行を作り、重要度
   assert.equal(result.checked, 20, '1回のバッチは最大20クラスタまで');
   const rows = db.prepare('SELECT COUNT(*) AS c FROM editorials').get().c;
   assert.equal(rows, 20 * PAPERS.length, 'チェックしたクラスタごとに全紙分の行ができる');
-  // 重要度再計算の配線: チェック済みクラスタのスコアは importanceFor と一致する
+  // 重要度再計算の配線: チェック済みクラスタのスコアは importanceFor と一致する。
+  // 比較は両辺とも固定 NOW の時間軸でそろえる（実時間で再計算するとフィクスチャが
+  // 24時間窓の外に出て 0 === 0 の空虚な比較になる）。非ゼロであることも固定し、
+  // 「窓内の活動がある話のスコアが保存される」こと自体を検証する。
   const checkedId = ids[0];
   const stored = db.prepare('SELECT importance_score AS s FROM clusters WHERE id = ?').get(checkedId).s;
-  assert.equal(stored, importanceFor(db, checkedId));
+  assert.ok(stored > 0, '窓内の活動があるクラスタの再計算スコアは非ゼロ');
+  assert.equal(stored, importanceFor(db, checkedId, NOW));
 });
 
 test('バッチ実行: 24時間超で再チェックされ checked_at が更新される', async () => {
