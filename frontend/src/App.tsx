@@ -19,7 +19,6 @@ import {
   fetchKeywords,
   fetchServerStatus,
   fetchTabRows,
-  formatWhen,
   postReadEvent,
   refreshFeed,
   removeBookmark,
@@ -35,6 +34,9 @@ import SettingsMenu from './SettingsMenu'
 import PollingControls from './PollingControls'
 import SearchBar from './SearchBar'
 import WatchBar from './WatchBar'
+import StoryListPane from './StoryListPane'
+import PaneDivider from './PaneDivider'
+import StoryDetailPane from './StoryDetailPane'
 import './App.css'
 
 const TABS: { id: FeedTab; label: string; hint: string }[] = [
@@ -62,22 +64,6 @@ const PANE_RATIO_MAX = 0.65
 // 狭幅レイアウトの境界（App.css の @media と一致させる）。
 // 狭幅では一覧と詳細を横に並べた全画面ページャーになる（2026-11-15 ユーザー決定）
 const NARROW_MEDIA = '(max-width: 860px)'
-
-/** 要約・社説のテキストを段落ごとに <p> で描く（改行を行・段落の区切りとして扱う）。 */
-function Paragraphs({ text }: { text: string }) {
-  const paras = text
-    .split(/\n+/)
-    .map((s) => s.trim())
-    .filter(Boolean)
-  if (paras.length === 0) return null
-  return (
-    <div className="paper-body">
-      {paras.map((p, i) => (
-        <p key={i}>{p}</p>
-      ))}
-    </div>
-  )
-}
 
 // 表示順（データに無いものは件数0として出さない）
 const CATEGORY_ORDER = [
@@ -134,7 +120,7 @@ function initialThemePreset(): ThemePreset {
   }
 }
 
-interface ListPage {
+export interface ListPage {
   ids: string[]
   total: number
 }
@@ -1527,332 +1513,56 @@ function App() {
         ref={workspaceRef}
         style={{ '--list-ratio': paneRatio } as CSSProperties}
       >
-        <section
-          className={
-            density === 'compact' ? 'list-pane is-compact' : 'list-pane'
-          }
-          aria-label="ニュース一覧"
-          onFocus={acknowledgeNew}
-          onPointerDown={acknowledgeNew}
-        >
-          {page === null ? (
-            <p className="empty">読み込み中…</p>
-          ) : visible.length === 0 ? (
-            <p className="empty">
-              {loadError ??
-                (tab === 'search' && !searchQuery
-                    ? '上の入力欄にキーワードを入れて検索してください。一致はクラスタと記事の見出し・要約が対象です。'
-                    : tab === 'search'
-                      ? `「${searchQuery}」に一致するニュースはありません。`
-                      : tab === 'watch' && keywords.length === 0
-                        ? 'キーワードが登録されていません。設定メニュー（右上のハンバーガー）からキーワードを登録してください。'
-                        : tab === 'watch' && watchKeyword
-                          ? `「${watchKeyword}」に一致するニュースはまだありません。`
-                          : 'この条件に表示するニュースはありません。')}
-            </p>
-          ) : (
-            <>
-              <ul>
-                {visible.map((story) => {
-                  const isActive = selected?.id === story.id
-                  // フッター行の中身（コンパクト時はメタ行へ畳む、Issue #4）
-                  const coverageNote = (
-                    <span>
-                      {story.coverages.length}紙
-                      {story.version === 1 ? ' · 初報' : ' · 続報'}
-                      {tab === 'editorials' &&
-                      story.editorialPapers &&
-                      story.editorialPapers.length > 0 ? (
-                        <span className="editorial-papers">
-                          {' · 社説 '}
-                          {story.editorialPapers.join('・')}
-                        </span>
-                      ) : null}
-                    </span>
-                  )
-                  const rowBadges = (
-                    <span className="badges">
-                      {story.isImportant ? (
-                        <span className="badge important">重要</span>
-                      ) : null}
-                      {story.isNew ? (
-                        <span className="badge fresh">新着</span>
-                      ) : null}
-                    </span>
-                  )
-                  const rowClass = [
-                    'row',
-                    isActive ? 'is-active' : '',
-                    highlightClusters.has(story.clusterId) ? 'is-new' : '',
-                    dimRead &&
-                    (story.read || readClusters.has(story.clusterId))
-                      ? 'is-read'
-                      : '',
-                  ]
-                    .filter(Boolean)
-                    .join(' ')
-                  return (
-                    <li key={story.id}>
-                      <button
-                        type="button"
-                        className={rowClass}
-                        onClick={() => openStory(story.id)}
-                      >
-                        <div className="row-main">
-                          <div className="row-meta">
-                            <span className="version">v{story.version}</span>
-                            <time dateTime={story.publishedAt}>
-                              {formatWhen(story.publishedAt)}
-                            </time>
-                            <span className="category">{story.category}</span>
-                            {density === 'compact' ? (
-                              <>
-                                {coverageNote}
-                                {rowBadges}
-                              </>
-                            ) : null}
-                          </div>
-                          <p className="row-title">{story.title}</p>
-                          <p className="row-lead">{story.lead}</p>
-                          {density === 'compact' ? null : (
-                            <div className="row-foot">
-                              {coverageNote}
-                              {rowBadges}
-                            </div>
-                          )}
-                        </div>
-                      </button>
-                    </li>
-                  )
-                })}
-              </ul>
-              {hasMore ? (
-                <button
-                  type="button"
-                  className="load-more"
-                  onClick={() => void loadPage(tab, category, page.ids.length, true)}
-                >
-                  もっと見る（残り{page.total - page.ids.length}件）
-                </button>
-              ) : null}
-            </>
-          )}
-        </section>
+        <StoryListPane
+          density={density}
+          acknowledgeNew={acknowledgeNew}
+          page={page}
+          visible={visible}
+          loadError={loadError}
+          tab={tab}
+          searchQuery={searchQuery}
+          keywords={keywords}
+          watchKeyword={watchKeyword}
+          selected={selected}
+          highlightClusters={highlightClusters}
+          dimRead={dimRead}
+          readClusters={readClusters}
+          openStory={openStory}
+          hasMore={hasMore}
+          category={category}
+          loadPage={loadPage}
+        />
 
-        <div
-          className={paneDragging ? 'pane-divider is-dragging' : 'pane-divider'}
-          role="separator"
-          aria-orientation="vertical"
-          aria-label="一覧と詳細の幅を調整"
-          aria-valuemin={0}
-          aria-valuemax={100}
-          aria-valuenow={Math.round(paneRatio * 100)}
-          aria-valuetext={`一覧の幅 ${Math.round(paneRatio * 100)}%`}
-          tabIndex={0}
-          title="ドラッグで一覧と詳細の幅を調整（ダブルクリックで既定に戻す）"
-          onPointerDown={handleDividerPointerDown}
-          onPointerMove={handleDividerPointerMove}
-          onPointerUp={() => setPaneDragging(false)}
-          onPointerCancel={() => setPaneDragging(false)}
-          onDoubleClick={() => setPaneRatio(PANE_RATIO_DEFAULT)}
-          onKeyDown={handleDividerKeyDown}
+        <PaneDivider
+          paneDragging={paneDragging}
+          paneRatio={paneRatio}
+          paneRatioDefault={PANE_RATIO_DEFAULT}
+          setPaneDragging={setPaneDragging}
+          setPaneRatio={setPaneRatio}
+          handleDividerPointerDown={handleDividerPointerDown}
+          handleDividerPointerMove={handleDividerPointerMove}
+          handleDividerKeyDown={handleDividerKeyDown}
         />
 
         {selected ? (
-          <article className="detail-pane" ref={detailRef}>
-            <header className="detail-head">
-              <button
-                type="button"
-                className="back-to-list"
-                onClick={goToListPane}
-              >
-                ← 一覧へ戻る
-              </button>
-              <p className="event-title">{selected.eventTitle}</p>
-              <h2>
-                {selected.title}
-                <button
-                  type="button"
-                  className={
-                    selected.bookmarked
-                      ? 'bookmark-toggle is-active'
-                      : 'bookmark-toggle'
-                  }
-                  onClick={toggleBookmark}
-                  aria-pressed={!!selected.bookmarked}
-                  aria-label={
-                    selected.bookmarked
-                      ? 'ブックマーク済み（解除する）'
-                      : 'ブックマークする'
-                  }
-                  title={
-                    selected.bookmarked
-                      ? 'ブックマーク済み（データを整理しても削除されません）'
-                      : 'ブックマークする'
-                  }
-                >
-                  <svg
-                    width="15"
-                    height="15"
-                    viewBox="0 0 24 24"
-                    fill={selected.bookmarked ? 'currentColor' : 'none'}
-                    stroke="currentColor"
-                    strokeWidth="2"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    aria-hidden="true"
-                  >
-                    <path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z" />
-                  </svg>
-                </button>
-              </h2>
-              <p className="version-meta">
-                v{selected.version}
-                {selected.version === 1 ? ' · 初報' : ' · 続報'}
-                {' · '}
-                <time dateTime={selected.versionCreatedAt}>
-                  {formatWhen(selected.versionCreatedAt)}
-                </time>
-              </p>
-              <p className="detail-lead">{selected.lead}</p>
-              <ol
-                className="version-rail"
-                aria-label="この出来事の版"
-                ref={versionRailRef}
-              >
-                {related.map((story) => (
-                  <li key={story.id}>
-                    <button
-                      type="button"
-                      className={
-                        story.id === selected.id
-                          ? 'version-chip is-active'
-                          : 'version-chip'
-                      }
-                      aria-current={story.id === selected.id || undefined}
-                      title={`v${story.version}${story.version === 1 ? '（初報）' : '（続報）'} · ${formatWhen(story.versionCreatedAt)}`}
-                      onClick={() => openStory(story.id)}
-                    >
-                      v{story.version}
-                    </button>
-                  </li>
-                ))}
-              </ol>
-            </header>
-
-            {detailLoading ? (
-              <p className="empty">詳細を読み込み中…</p>
-            ) : (
-              <>
-                <div className="outlet-bar" role="tablist" aria-label="新聞社">
-                  {visibleCoverages.map((coverage) => (
-                    <button
-                      key={coverage.outletId}
-                      type="button"
-                      role="tab"
-                      aria-selected={coverage.outletId === activeOutlet?.outletId}
-                      className={
-                        coverage.outletId === activeOutlet?.outletId
-                          ? 'outlet is-active'
-                          : 'outlet'
-                      }
-                      onClick={() => setOutletId(coverage.outletId)}
-                    >
-                      {coverage.outletName}
-                      {coverage.editorial ? (
-                        <span className="editorial-badge">社説あり</span>
-                      ) : null}
-                    </button>
-                  ))}
-                </div>
-
-                <div className="kind-bar" role="tablist" aria-label="記事の種類">
-                  {visibleKinds.map(([kind, label]) => (
-                    <button
-                      key={kind}
-                      type="button"
-                      role="tab"
-                      aria-selected={effectiveKind === kind}
-                      className={
-                        effectiveKind === kind ? 'kind is-active' : 'kind'
-                      }
-                      onClick={() => {
-                        // 媒体の選択は種別を切り替えても維持する（社説ビューで
-                        // 「選択中の媒体に社説があるか」を正しく判定するため）
-                        setCoverageKind(kind)
-                      }}
-                    >
-                      {label}
-                    </button>
-                  ))}
-                </div>
-
-                {activeOutlet ? (
-                  <div className="paper">
-                    <p className="paper-kicker">
-                      {activeOutlet.outletName}
-                      <time dateTime={activeOutlet.publishedAt}>
-                        {formatWhen(activeOutlet.publishedAt)}
-                      </time>
-                    </p>
-                    <h3>{activeOutlet.headline}</h3>
-                    {effectiveKind === 'editorial' ? (
-                      editorialLoading ? (
-                        <p className="paper-note">社説を確認中…</p>
-                      ) : activeOutlet.editorial ? (
-                        <>
-                          <p className="paper-owner">
-                            {activeOutlet.outletName}の社説
-                          </p>
-                          <Paragraphs text={activeOutlet.editorial ?? ''} />
-                          {activeOutlet.editorialUrl ? (
-                            <a
-                              className="paper-link"
-                              href={activeOutlet.editorialUrl}
-                              target="_blank"
-                              rel="noreferrer"
-                            >
-                              社説の元記事を読む
-                            </a>
-                          ) : null}
-                          <p className="paper-note">
-                            社説は版ごとではなく、この出来事全体に対するものです。
-                          </p>
-                        </>
-                      ) : (
-                        <p className="paper-notice">
-                          {activeOutlet.outletName}の社説はありません。
-                          {editorialOutlets.length > 0
-                            ? `社説があるのは ${editorialOutlets
-                                .map((c) => c.outletName)
-                                .join('・')} です。上の媒体ボタン（「社説あり」の印が付いたもの）から選んでください。`
-                            : ''}
-                        </p>
-                      )
-                    ) : (
-                      <>
-                        <Paragraphs
-                          text={activeOutlet.summary || '（RSS 抜粋はありません）'}
-                        />
-                        {activeOutlet.url ? (
-                          <a
-                            className="paper-link"
-                            href={activeOutlet.url}
-                            target="_blank"
-                            rel="noreferrer"
-                          >
-                            元記事を読む
-                          </a>
-                        ) : null}
-                      </>
-                    )}
-                  </div>
-                ) : effectiveKind === 'editorial' && editorialLoading ? (
-                  <p className="muted">社説を確認中…</p>
-                ) : null}
-              </>
-            )}
-          </article>
+          <StoryDetailPane
+            selected={selected}
+            detailRef={detailRef}
+            versionRailRef={versionRailRef}
+            goToListPane={goToListPane}
+            toggleBookmark={toggleBookmark}
+            related={related}
+            openStory={openStory}
+            detailLoading={detailLoading}
+            visibleCoverages={visibleCoverages}
+            activeOutlet={activeOutlet}
+            setOutletId={setOutletId}
+            visibleKinds={visibleKinds}
+            effectiveKind={effectiveKind}
+            setCoverageKind={setCoverageKind}
+            editorialLoading={editorialLoading}
+            editorialOutlets={editorialOutlets}
+          />
         ) : null}
       </div>
         </>
