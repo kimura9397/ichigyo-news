@@ -5,10 +5,20 @@
 //   （nextAt）が載る
 // - 間隔は既存の 2/5/10 分のみ。それ以外は 400
 // - フロントはタブ側タイマーで収集を開始せず、サーバー状態の設定と同期だけを行う
-import { test, before, after } from 'node:test';
+//
+// テスト同士の独立性（Issue #11）:
+// - サーバー／DB はテストごとに新規に作る（共有しない）。各テストは
+//   空きポートに専用サーバーを起動し、専用の一時 DB を seed するので、
+//   他のテストが設定したポーリング状態を引き継がない
+// - 各テストの検証は「自分が設定した値」に閉じる。前のテストの状態を
+//   前提にするアサーションは置かない
+// - 再起動テストも専用サーバー／DB の中で完結し、再起動前後で同じ
+//   DB ファイルを使う点だけを維持する
+import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { mkdtempSync, rmSync, readFileSync } from 'node:fs';
+import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -16,12 +26,7 @@ import { openDb } from '../src/db.mjs';
 import { normalizeForSearch } from '../src/normalize.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
-const PORT = 8926;
-const BASE = `http://127.0.0.1:${PORT}`;
 const read = (rel) => readFileSync(join(ROOT, rel), 'utf8');
-
-let proc;
-let dir;
 
 function seed(dbPath) {
   const db = openDb(dbPath);
@@ -42,11 +47,23 @@ function seed(dbPath) {
   db.close();
 }
 
-async function waitReady() {
+/** 空きポートを1つ確保して返す（テストごとに別のポートを使うため）。 */
+async function freePort() {
+  const srv = createServer();
+  await new Promise((resolve, reject) => {
+    srv.once('error', reject);
+    srv.listen(0, '127.0.0.1', resolve);
+  });
+  const { port } = srv.address();
+  await new Promise((resolve) => srv.close(resolve));
+  return port;
+}
+
+async function waitReady(base) {
   const deadline = Date.now() + 15000;
   while (Date.now() < deadline) {
     try {
-      const res = await fetch(`${BASE}/api/status`);
+      const res = await fetch(`${base}/api/status`);
       if (res.ok) return;
     } catch {
       /* 起動待ち */
@@ -56,100 +73,169 @@ async function waitReady() {
   throw new Error('サーバーが起動しませんでした');
 }
 
-before(async () => {
-  dir = mkdtempSync(join(tmpdir(), 'ichigyo-polling-'));
+/**
+ * テスト専用のサーバーを、seed 済みの専用 DB と空きポートで起動する。
+ * 戻り値の stop() でサーバー終了と一時ディレクトリ削除まで行う。
+ * restart() は同じ DB・同じポートでサーバーだけを再起動する。
+ */
+async function startServer() {
+  const dir = mkdtempSync(join(tmpdir(), 'ichigyo-polling-'));
   const dbPath = join(dir, 'news.db');
   seed(dbPath);
-  proc = spawn('node', ['server.mjs'], {
-    cwd: ROOT,
-    env: { ...process.env, PORT: String(PORT), HOST: '127.0.0.1', NEWS_DB_PATH: dbPath },
-    stdio: 'ignore',
-  });
-  await waitReady();
-});
+  const port = await freePort();
+  const base = `http://127.0.0.1:${port}`;
+  let proc = null;
 
-after(() => {
-  proc?.kill('SIGKILL');
-  if (dir) rmSync(dir, { recursive: true, force: true });
-});
+  const spawnServer = async () => {
+    proc = spawn('node', ['server.mjs'], {
+      cwd: ROOT,
+      env: { ...process.env, PORT: String(port), HOST: '127.0.0.1', NEWS_DB_PATH: dbPath },
+      stdio: 'ignore',
+    });
+    await waitReady(base);
+  };
+  const stopServer = async () => {
+    if (!proc) return;
+    const current = proc;
+    proc = null;
+    current.kill('SIGKILL');
+    await new Promise((r) => current.once('exit', r));
+  };
 
-async function status() {
-  const res = await fetch(`${BASE}/api/status`);
+  await spawnServer();
+  return {
+    base,
+    dbPath,
+    restart: async () => {
+      await stopServer();
+      await spawnServer();
+    },
+    stop: async () => {
+      await stopServer();
+      rmSync(dir, { recursive: true, force: true });
+    },
+  };
+}
+
+async function status(base) {
+  const res = await fetch(`${base}/api/status`);
   assert.equal(res.ok, true);
   return res.json();
 }
 
-async function postPolling(body) {
-  return fetch(`${BASE}/api/polling`, {
+async function postPolling(base, body) {
+  return fetch(`${base}/api/polling`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify(body),
   });
 }
 
+/** ポーリング状態を既知の値に設定し、設定後の polling を返す（設定自体も検証する）。 */
+async function setPolling(base, body) {
+  const res = await postPolling(base, body);
+  assert.equal(res.status, 200);
+  const data = await res.json();
+  return data.polling;
+}
+
 test('初期状態は OFF で、/api/status に polling が載る', async () => {
-  const s = await status();
-  assert.deepEqual(s.polling, { enabled: false, minutes: 5, nextAt: null });
+  const srv = await startServer();
+  try {
+    // このテスト専用に新規作成した DB なので、保存済みの状態は無く初期値のはず
+    const s = await status(srv.base);
+    assert.deepEqual(s.polling, { enabled: false, minutes: 5, nextAt: null });
+  } finally {
+    await srv.stop();
+  }
 });
 
 test('POST /api/polling で有効化でき、nextAt が間隔どおりに立つ', async () => {
-  const before = Date.now();
-  const res = await postPolling({ enabled: true, minutes: 2 });
-  assert.equal(res.status, 200);
-  const data = await res.json();
-  assert.equal(data.polling.enabled, true);
-  assert.equal(data.polling.minutes, 2);
-  assert.ok(typeof data.polling.nextAt === 'number', 'nextAt が数値で返る');
-  assert.ok(data.polling.nextAt > before + 100 * 1000, 'nextAt は約2分先');
-  assert.ok(data.polling.nextAt <= Date.now() + 120 * 1000, 'nextAt は2分以内');
-  const s = await status();
-  assert.equal(s.polling.enabled, true);
-  assert.equal(s.polling.minutes, 2);
-  assert.equal(s.polling.nextAt, data.polling.nextAt);
+  const srv = await startServer();
+  try {
+    const before = Date.now();
+    const res = await postPolling(srv.base, { enabled: true, minutes: 2 });
+    assert.equal(res.status, 200);
+    const data = await res.json();
+    assert.equal(data.polling.enabled, true);
+    assert.equal(data.polling.minutes, 2);
+    assert.ok(typeof data.polling.nextAt === 'number', 'nextAt が数値で返る');
+    assert.ok(data.polling.nextAt > before + 100 * 1000, 'nextAt は約2分先');
+    assert.ok(data.polling.nextAt <= Date.now() + 120 * 1000, 'nextAt は2分以内');
+    const s = await status(srv.base);
+    assert.equal(s.polling.enabled, true);
+    assert.equal(s.polling.minutes, 2);
+    assert.equal(s.polling.nextAt, data.polling.nextAt);
+  } finally {
+    await srv.stop();
+  }
 });
 
 test('/api/stories のレスポンスにも polling が載る', async () => {
-  const res = await fetch(`${BASE}/api/stories?tab=important&limit=10`);
-  assert.equal(res.ok, true);
-  const data = await res.json();
-  assert.equal(data.polling.enabled, true);
-  assert.equal(data.polling.minutes, 2);
-  assert.ok(typeof data.polling.nextAt === 'number');
+  const srv = await startServer();
+  try {
+    // 前提状態はこのテスト自身が作る（他のテストの設定を引き継がない）
+    const own = await setPolling(srv.base, { enabled: true, minutes: 2 });
+    const res = await fetch(`${srv.base}/api/stories?tab=important&limit=10`);
+    assert.equal(res.ok, true);
+    const data = await res.json();
+    assert.equal(data.polling.enabled, true);
+    assert.equal(data.polling.minutes, 2);
+    assert.ok(typeof data.polling.nextAt === 'number');
+    assert.equal(data.polling.nextAt, own.nextAt);
+  } finally {
+    await srv.stop();
+  }
 });
 
 test('不正な間隔は 400 で、状態は変わらない', async () => {
-  const res = await postPolling({ enabled: true, minutes: 7 });
-  assert.equal(res.status, 400);
-  const s = await status();
-  assert.equal(s.polling.minutes, 2);
+  const srv = await startServer();
+  try {
+    // 「変わらない」ことの比較対象は、このテスト自身が設定した既知の状態
+    const own = await setPolling(srv.base, { enabled: true, minutes: 2 });
+    const res = await postPolling(srv.base, { enabled: true, minutes: 7 });
+    assert.equal(res.status, 400);
+    const s = await status(srv.base);
+    assert.equal(s.polling.minutes, 2);
+    assert.equal(s.polling.enabled, own.enabled);
+    assert.equal(s.polling.nextAt, own.nextAt);
+  } finally {
+    await srv.stop();
+  }
 });
 
 test('無効化すると nextAt が null に戻る', async () => {
-  const res = await postPolling({ enabled: false, minutes: 2 });
-  assert.equal(res.status, 200);
-  const data = await res.json();
-  assert.deepEqual(data.polling, { enabled: false, minutes: 2, nextAt: null });
-  const s = await status();
-  assert.equal(s.polling.enabled, false);
-  assert.equal(s.polling.nextAt, null);
+  const srv = await startServer();
+  try {
+    // まずこのテスト自身で有効化してから無効化する
+    await setPolling(srv.base, { enabled: true, minutes: 2 });
+    const res = await postPolling(srv.base, { enabled: false, minutes: 2 });
+    assert.equal(res.status, 200);
+    const data = await res.json();
+    assert.deepEqual(data.polling, { enabled: false, minutes: 2, nextAt: null });
+    const s = await status(srv.base);
+    assert.equal(s.polling.enabled, false);
+    assert.equal(s.polling.nextAt, null);
+  } finally {
+    await srv.stop();
+  }
 });
 
 test('サーバー再起動でポーリング状態が復元され、スケジュールが再開する', async () => {
-  const res = await postPolling({ enabled: true, minutes: 10 });
-  assert.equal(res.status, 200);
-  proc.kill('SIGKILL');
-  await new Promise((r) => proc.once('exit', r));
-  proc = spawn('node', ['server.mjs'], {
-    cwd: ROOT,
-    env: { ...process.env, PORT: String(PORT), HOST: '127.0.0.1', NEWS_DB_PATH: join(dir, 'news.db') },
-    stdio: 'ignore',
-  });
-  await waitReady();
-  const s = await status();
-  assert.equal(s.polling.enabled, true, '有効状態が復元される');
-  assert.equal(s.polling.minutes, 10, '間隔が復元される');
-  assert.ok(typeof s.polling.nextAt === 'number', 'スケジュールが再開し nextAt が立つ');
-  assert.ok(s.polling.nextAt > Date.now(), 'nextAt は未来に立つ');
+  const srv = await startServer();
+  try {
+    // 復元されるべき状態はこのテスト自身が設定する
+    const res = await postPolling(srv.base, { enabled: true, minutes: 10 });
+    assert.equal(res.status, 200);
+    await srv.restart();
+    const s = await status(srv.base);
+    assert.equal(s.polling.enabled, true, '有効状態が復元される');
+    assert.equal(s.polling.minutes, 10, '間隔が復元される');
+    assert.ok(typeof s.polling.nextAt === 'number', 'スケジュールが再開し nextAt が立つ');
+    assert.ok(s.polling.nextAt > Date.now(), 'nextAt は未来に立つ');
+  } finally {
+    await srv.stop();
+  }
 });
 
 test('サーバー: タイマーは単一飛行の startRefresh に相乗りする', () => {
