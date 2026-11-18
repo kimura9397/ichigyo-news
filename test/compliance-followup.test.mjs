@@ -71,7 +71,8 @@ test('build-sea は Node のバージョン固定とチェックサム照合を�
 });
 
 test('キーワードウォッチの注記（Google ニュース検索への送信）が設定画面にある', () => {
-  const app = read('frontend/src/App.tsx');
+  // 設定メニューは SettingsMenu.tsx に切り出し済み（App.tsx と合わせて対象にする）
+  const app = read('frontend/src/App.tsx') + read('frontend/src/SettingsMenu.tsx');
   assert.ok(app.includes('Google ニュース検索に送信されます'), '設定画面に送信の注記がありません');
 });
 

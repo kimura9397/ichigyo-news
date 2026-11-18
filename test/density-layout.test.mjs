@@ -11,6 +11,7 @@ import { fileURLToPath } from 'node:url';
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const appCss = readFileSync(join(ROOT, 'frontend/src/App.css'), 'utf8');
 const appTsx = readFileSync(join(ROOT, 'frontend/src/App.tsx'), 'utf8');
+const settingsMenuTsx = readFileSync(join(ROOT, 'frontend/src/SettingsMenu.tsx'), 'utf8');
 
 function stripComments(css) {
   return css.replace(/\/\*[\s\S]*?\*\//g, '');
@@ -72,7 +73,7 @@ test('App.tsx: 密度のデフォルトはコンパクトで、保存済みの s
 test('App.tsx: 密度設定は localStorage（ichigyo:density）に保存し、一覧へ is-compact で適用する', () => {
   assert.ok(appTsx.includes("localStorage.getItem('ichigyo:density')"), 'ichigyo:density の読み込みがありません');
   assert.ok(appTsx.includes("localStorage.setItem('ichigyo:density', density)"), 'ichigyo:density の保存がありません');
-  assert.ok(appTsx.includes('一覧の密度'), '設定メニューの「一覧の密度」項目がありません');
+  assert.ok(settingsMenuTsx.includes('一覧の密度'), '設定メニューの「一覧の密度」項目がありません');
   assert.ok(appTsx.includes("'list-pane is-compact'"), 'コンパクト時に is-compact が付きません');
   assert.ok(appTsx.includes("density === 'compact' ? null : ("), 'コンパクト時にフッター行を出さない分岐がありません');
 });

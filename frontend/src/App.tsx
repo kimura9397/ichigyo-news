@@ -31,6 +31,7 @@ import {
 } from './api'
 import type { CoverageKind, FeedTab, StoryRow } from './types'
 import Spotlight from './Spotlight'
+import SettingsMenu from './SettingsMenu'
 import './App.css'
 
 const TABS: { id: FeedTab; label: string; hint: string }[] = [
@@ -90,10 +91,10 @@ const ALL_CATEGORY = 'すべて'
 
 type DetailState = 'loading' | 'loaded'
 type EditorialState = 'unchecked' | 'loading' | 'done'
-type FontSizeSetting = 'small' | 'medium' | 'large'
+export type FontSizeSetting = 'small' | 'medium' | 'large'
 /** 一覧の密度（2026-11-16 ユーザー決定、Issue #4）。コンパクトは行の構造を詰めて
  * 1画面に入る行数を増やす（モニター用途）。フォントサイズは変えない */
-type DensitySetting = 'standard' | 'compact'
+export type DensitySetting = 'standard' | 'compact'
 /**
  * テーマプリセット（2026-11-16 ユーザー決定）。旧「テーマ（ライト/ダーク/端末）」と
  * 「アクセント色（5色）」を一本化したもので、各プリセットがパレット全体を決める。
@@ -112,7 +113,7 @@ const THEME_PRESETS = [
     color: 'linear-gradient(90deg, #f4eee3 50%, #38322a 50%)',
   },
 ] as const
-type ThemePreset = (typeof THEME_PRESETS)[number]['id']
+export type ThemePreset = (typeof THEME_PRESETS)[number]['id']
 
 /**
  * 保存済みテーマの初期値。新しい保存先（ichigyo:themePreset）があればそれを使い、
@@ -286,7 +287,6 @@ function App() {
     }
   })
   const [menuOpen, setMenuOpen] = useState(false)
-  const menuRef = useRef<HTMLDivElement | null>(null)
   /** このセッションで詳細を開いたクラスタ（サーバーの read_flag と合わせて薄表示に使う） */
   const [readClusters, setReadClusters] = useState<ReadonlySet<number>>(
     new Set(),
@@ -358,25 +358,6 @@ function App() {
       /* 同上 */
     }
   }, [mutedCategories])
-
-  // 設定メニューは外側クリックと Esc で閉じる
-  useEffect(() => {
-    if (!menuOpen) return
-    const onPointerDown = (e: PointerEvent) => {
-      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
-        setMenuOpen(false)
-      }
-    }
-    const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setMenuOpen(false)
-    }
-    document.addEventListener('pointerdown', onPointerDown)
-    document.addEventListener('keydown', onKeyDown)
-    return () => {
-      document.removeEventListener('pointerdown', onPointerDown)
-      document.removeEventListener('keydown', onKeyDown)
-    }
-  }, [menuOpen])
 
   // キーワードウォッチ（2026-11-15 ユーザー決定）。キーワードはサーバー側（DB）に保存する
   // （照合条件であると同時に、更新時の収集クエリでもあるため）。
@@ -1321,257 +1302,34 @@ function App() {
                 )}
               </svg>
             </button>
-            <div className="menu-wrap" ref={menuRef}>
-              <button
-                type="button"
-                className="icon-btn"
-                onClick={() => setMenuOpen((v) => !v)}
-                aria-haspopup="menu"
-                aria-expanded={menuOpen}
-                title="設定"
-                aria-label="設定メニューを開く"
-              >
-                <svg
-                  width="17"
-                  height="17"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                  strokeLinecap="round"
-                  aria-hidden="true"
-                >
-                  <line x1="3" y1="6" x2="21" y2="6" />
-                  <line x1="3" y1="12" x2="21" y2="12" />
-                  <line x1="3" y1="18" x2="21" y2="18" />
-                </svg>
-              </button>
-              {menuOpen ? (
-                <div className="menu-panel" role="menu" aria-label="設定">
-                  <section className="menu-section">
-                    <h3>表示</h3>
-                    <div className="menu-row is-stack">
-                      <span className="menu-label">文字の大きさ</span>
-                      <div
-                        className="segmented"
-                        role="group"
-                        aria-label="文字の大きさ"
-                      >
-                        {(
-                          [
-                            ['small', '小'],
-                            ['medium', '中'],
-                            ['large', '大'],
-                          ] as const
-                        ).map(([value, label]) => (
-                          <button
-                            key={value}
-                            type="button"
-                            className={
-                              fontSize === value ? 'seg is-active' : 'seg'
-                            }
-                            onClick={() => setFontSize(value)}
-                            aria-pressed={fontSize === value}
-                          >
-                            {label}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                    <div className="menu-row is-stack">
-                      <span className="menu-label">一覧の密度</span>
-                      <div
-                        className="segmented"
-                        role="group"
-                        aria-label="一覧の密度"
-                      >
-                        {(
-                          [
-                            ['standard', '標準'],
-                            ['compact', 'コンパクト'],
-                          ] as const
-                        ).map(([value, label]) => (
-                          <button
-                            key={value}
-                            type="button"
-                            className={
-                              density === value ? 'seg is-active' : 'seg'
-                            }
-                            onClick={() => setDensity(value)}
-                            aria-pressed={density === value}
-                          >
-                            {label}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                    <div className="menu-row is-stack">
-                      <span className="menu-label">
-                        スポットライトの表示時間
-                      </span>
-                      <div
-                        className="segmented"
-                        role="group"
-                        aria-label="スポットライトで1件を表示する時間"
-                      >
-                        {SPOTLIGHT_SECONDS_OPTIONS.map((s) => (
-                          <button
-                            key={s}
-                            type="button"
-                            className={
-                              spotlightSeconds === s ? 'seg is-active' : 'seg'
-                            }
-                            onClick={() => setSpotlightSeconds(s)}
-                            aria-pressed={spotlightSeconds === s}
-                          >
-                            {s}秒
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                    <div className="menu-row is-stack">
-                      <span className="menu-label">テーマ</span>
-                      <div
-                        className="preset-swatches"
-                        role="group"
-                        aria-label="テーマ"
-                      >
-                        {THEME_PRESETS.map((p) => (
-                          <button
-                            key={p.id}
-                            type="button"
-                            className={
-                              themePreset === p.id
-                                ? 'preset-swatch is-active'
-                                : 'preset-swatch'
-                            }
-                            onClick={() => setThemePreset(p.id)}
-                            aria-pressed={themePreset === p.id}
-                            title={p.title}
-                          >
-                            <span
-                              className="preset-dot"
-                              style={{ background: p.color }}
-                            />
-                            {p.label}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                    <div className="menu-row">
-                      <span className="menu-label">
-                        読んだニュースを薄く表示
-                      </span>
-                      <button
-                        type="button"
-                        className="switch"
-                        role="switch"
-                        aria-checked={dimRead}
-                        onClick={() => setDimRead((v) => !v)}
-                        aria-label="詳細を開いたニュースの行を薄く表示する"
-                      >
-                        <span className="switch-track">
-                          <span className="switch-thumb" />
-                        </span>
-                      </button>
-                    </div>
-                  </section>
-                  <section className="menu-section">
-                    <h3>重要タブに出さないカテゴリ</h3>
-                    <p className="menu-note">
-                      オンにしたカテゴリは重要タブに表示されません。新着・すべて・社説タブには影響しません。
-                    </p>
-                    {CATEGORY_ORDER.map((c) => (
-                      <div className="menu-row" key={c}>
-                        <span className="menu-label">{c}</span>
-                        <button
-                          type="button"
-                          className="switch"
-                          role="switch"
-                          aria-checked={mutedCategories.includes(c)}
-                          onClick={() => toggleMuteCategory(c)}
-                          aria-label={`${c}を重要タブに出さない`}
-                        >
-                          <span className="switch-track">
-                            <span className="switch-thumb" />
-                          </span>
-                        </button>
-                      </div>
-                    ))}
-                  </section>
-                  <section className="menu-section">
-                    <h3>キーワードウォッチ</h3>
-                    <p className="menu-note">
-                      登録したキーワードを含むニュースだけを、タブ行のキーワードボタンから見られます。一致は見出しと要約が対象で、表記ゆれ（漏洩／漏えい等）も吸収します。キーワードはサーバーに保存され、更新のたびにそのキーワードのニュースも自動で集めます。登録したキーワードは、収集のために更新のたび Google ニュース検索に送信されます。
-                    </p>
-                    <form
-                      className="kw-form"
-                      onSubmit={(e) => {
-                        e.preventDefault()
-                        void (async () => {
-                          if (await addKeyword(keywordInput)) setKeywordInput('')
-                        })()
-                      }}
-                    >
-                      <input
-                        className="kw-input"
-                        type="text"
-                        value={keywordInput}
-                        onChange={(e) => setKeywordInput(e.target.value)}
-                        placeholder="例: 今田美桜"
-                        aria-label="登録するキーワード"
-                        maxLength={50}
-                      />
-                      <button type="submit" className="kw-add">
-                        追加
-                      </button>
-                    </form>
-                    {keywords.length > 0 ? (
-                      <ul className="kw-list">
-                        {keywords.map((k) => (
-                          <li key={k} className="kw-item">
-                            <span>{k}</span>
-                            <button
-                              type="button"
-                              className="kw-remove"
-                              onClick={() => removeKeyword(k)}
-                              aria-label={`「${k}」をキーワードから削除`}
-                            >
-                              削除
-                            </button>
-                          </li>
-                        ))}
-                      </ul>
-                    ) : (
-                      <p className="menu-note">まだ登録されていません。</p>
-                    )}
-                  </section>
-                  <section className="menu-section">
-                    <h3>データの管理</h3>
-                    <div className="menu-row">
-                      <span className="menu-label">データベース容量</span>
-                      <span className="menu-value">
-                        {dbBytes !== null ? formatBytes(dbBytes) : '—'}
-                      </span>
-                    </div>
-                    <button
-                      type="button"
-                      className="menu-action-btn"
-                      onClick={() => {
-                        setMenuOpen(false)
-                        setConfirmingMaintenance(true)
-                      }}
-                      disabled={maintaining}
-                    >
-                      古いデータを削除してDBを圧縮
-                    </button>
-                    <p className="menu-note">
-                      7日より前のニュース（ブックマークしたものを除く）を削除します。実行前に確認ダイアログが出ます。
-                    </p>
-                  </section>
-                </div>
-              ) : null}
-            </div>
+            <SettingsMenu
+              menuOpen={menuOpen}
+              setMenuOpen={setMenuOpen}
+              fontSize={fontSize}
+              setFontSize={setFontSize}
+              density={density}
+              setDensity={setDensity}
+              spotlightSeconds={spotlightSeconds}
+              setSpotlightSeconds={setSpotlightSeconds}
+              spotlightSecondsOptions={SPOTLIGHT_SECONDS_OPTIONS}
+              themePreset={themePreset}
+              setThemePreset={setThemePreset}
+              themePresets={THEME_PRESETS}
+              dimRead={dimRead}
+              setDimRead={setDimRead}
+              categoryOrder={CATEGORY_ORDER}
+              mutedCategories={mutedCategories}
+              toggleMuteCategory={toggleMuteCategory}
+              keywords={keywords}
+              keywordInput={keywordInput}
+              setKeywordInput={setKeywordInput}
+              addKeyword={addKeyword}
+              removeKeyword={removeKeyword}
+              dbBytes={dbBytes}
+              formatBytes={formatBytes}
+              maintaining={maintaining}
+              setConfirmingMaintenance={setConfirmingMaintenance}
+            />
           </div>
         </div>
       </header>
