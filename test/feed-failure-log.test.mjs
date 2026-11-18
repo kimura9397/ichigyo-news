@@ -10,7 +10,8 @@ import { readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { openDb } from '../src/db.mjs';
-import { refresh, feedFailureMessage } from '../src/collector.mjs';
+import { refresh } from '../src/collector.mjs';
+import { feedFailureMessage } from '../src/rss.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -78,7 +79,7 @@ test('refresh: ポーリング有効時は「次の更新で再取得します�
 });
 
 test('方針の固定: 取得経路にリトライとホスト単位のスロットルが残っていない', () => {
-  const collector = readFileSync(join(ROOT, 'src/collector.mjs'), 'utf8');
+  const collector = readFileSync(join(ROOT, 'src/rss.mjs'), 'utf8') + readFileSync(join(ROOT, 'src/collector.mjs'), 'utf8');
   assert.ok(!collector.includes('withHostSlot'), 'ホスト単位のスロットルが残っています');
   assert.ok(!collector.includes('retryAfterMs'), 'Retry-After のリトライ処理が残っています');
   assert.ok(!collector.includes('HOST_MIN_INTERVAL_MS'), '開始間隔の調整が残っています');

@@ -2,7 +2,7 @@
 // 過去に誤判定した実例を固定し、再発を防ぐ。補正は「明確な語がある場合だけ」の最小限。
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { refineCategory } from '../src/collector.mjs';
+import { refineCategory } from '../src/classify.mjs';
 
 test('車いすマラソンは、フィードのカテゴリが違ってもスポーツに補正される', () => {
   assert.equal(refineCategory('大分国際車いすマラソンで日本新記録', '国際'), 'スポーツ');

@@ -13,7 +13,7 @@ import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { openDb } from '../src/db.mjs';
-import { importanceFor } from '../src/collector.mjs';
+import { importanceFor } from '../src/classify.mjs';
 import { recomputeAllImportance } from '../src/lifecycle.mjs';
 
 const HOUR = 3600000;

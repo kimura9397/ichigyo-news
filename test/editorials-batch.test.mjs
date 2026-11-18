@@ -6,7 +6,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { openDb } from '../src/db.mjs';
-import { PAPERS, editorialCheckCandidates, checkTopEditorials, importanceFor } from '../src/collector.mjs';
+import { PAPERS } from '../src/rss.mjs';
+import { editorialCheckCandidates, checkTopEditorials } from '../src/editorials.mjs';
+import { importanceFor } from '../src/classify.mjs';
 
 const NOW = new Date('2026-11-15T12:00:00.000Z');
 const hoursAgo = (h, base = NOW) => new Date(base.getTime() - h * 3600000).toISOString();
