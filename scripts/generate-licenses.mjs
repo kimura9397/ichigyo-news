@@ -2,6 +2,15 @@
 // 使い方: node scripts/generate-licenses.mjs
 // 出力先: frontend/public/third-party-licenses.txt
 //   フロントのビルドで public/ にコピーされ、Web 配布と SEA（exe）の両方に同梱される。
+// 正本は生成先の frontend/public/ 側だけ（Issue #10、案Aで現状維持を明示）。
+//   ルートの public/third-party-licenses.txt は Vite ビルド時に publicDir から
+//   コピーされたもので、正本ではない。両方に同一ファイルがあるのはビルドの
+//   仕組み上当然の重複であり、手で片方だけ消してはいけない:
+//   public/ は成果物ごと git 追跡し（clone 直後にビルド不要で
+//   `node server.mjs` だけで動くため）、SEA ビルドも public/ を同梱するため、
+//   public/ 側が欠けると配布物で /third-party-licenses.txt が開けなくなる。
+//   内容を更新する時はこのスクリプトで正本を生成し直し、フロントのビルドで
+//   public/ 側へ反映すること。
 // 対象は「配布物に実際に含まれるもの」だけ:
 //   - Web UI にバンドルされる npm パッケージ（frontend の dependencies のうち実行時に使うもの）
 //   - Windows exe の土台になる Node.js 本体（バージョンは build-sea.mjs の NODE_VERSION と一致させる）
