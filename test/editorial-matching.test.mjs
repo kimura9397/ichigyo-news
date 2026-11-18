@@ -12,7 +12,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { openDb } from '../src/db.mjs';
-import { editorialRelated, fetchEditorials, importanceFor, PAPERS } from '../src/collector.mjs';
+import { PAPERS } from '../src/rss.mjs';
+import { editorialRelated, fetchEditorials } from '../src/editorials.mjs';
+import { importanceFor } from '../src/classify.mjs';
 import { reevaluateEditorials } from '../src/lifecycle.mjs';
 
 const MARATHON_TITLE = '車いすマラソン、ソウルで開催　日本選手が入賞';

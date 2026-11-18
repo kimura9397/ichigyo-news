@@ -7,7 +7,9 @@
 // - 保存済みの社説（found=1）は現在の関連判定で再評価し、通らないものは found=0 に降格する（社説の誤マッチ対策、2026-11-15）。
 // - 本文機能の廃止（2026-11-16）に伴い、既存DBに残る本文・画像・記者名の保存データは
 //   purgeBodyData で消去する（サーバー起動時と refresh のライフサイクルで実行、冪等）。
-import { editorialRelated, importanceFor, bigrams, filterWeakBigrams, matchScore, jaccard, strongTerms, summaryWords, refineCategory, hasStoryAnchor, isNumericOnlyRevision } from './collector.mjs';
+import { editorialRelated } from './editorials.mjs';
+import { importanceFor, refineCategory } from './classify.mjs';
+import { bigrams, filterWeakBigrams, matchScore, jaccard, strongTerms, summaryWords, hasStoryAnchor, isNumericOnlyRevision } from './matching.mjs';
 import { normalizeForSearch, buildArticleSearchText } from './normalize.mjs';
 
 export const RETENTION_DAYS = 7;

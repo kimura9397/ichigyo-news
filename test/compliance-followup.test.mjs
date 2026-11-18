@@ -10,7 +10,7 @@ import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
-import { readResponseText, MAX_FEED_BYTES } from '../src/collector.mjs';
+import { readResponseText, MAX_FEED_BYTES } from '../src/rss.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const read = (rel) => readFileSync(join(ROOT, rel), 'utf8');
@@ -77,7 +77,7 @@ test('キーワードウォッチの注記（Google ニュース検索への送�
 });
 
 test('2回目チェック: 社説取得も共用ヘルパー経由で、タイムアウトは本文読み取りまで保持される', () => {
-  const collector = read('src/collector.mjs');
+  const collector = read('src/rss.mjs') + read('src/editorials.mjs');
   assert.ok(collector.includes('await fetchRssText(url, fetchImpl)'), '社説取得が共用ヘルパーを経由していません');
   // タイマーの生成は共用ヘルパーの1か所だけ（社説側の早期解除が再発しないこと）
   const timers = collector.split('setTimeout(() => ctrl.abort(), FETCH_TIMEOUT_MS)').length - 1;

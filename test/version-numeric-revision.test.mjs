@@ -7,7 +7,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { openDb } from '../src/db.mjs';
-import { ingestArticles, hasStoryAnchor, isNewFactFollowUp, isNumericOnlyRevision, numericUnitType } from '../src/collector.mjs';
+import { ingestArticles } from '../src/collector.mjs';
+import { hasStoryAnchor, isNewFactFollowUp, isNumericOnlyRevision, numericUnitType } from '../src/matching.mjs';
 import { foldNumericOnlyVersions } from '../src/lifecycle.mjs';
 
 const clusterOf = (db, url) => db.prepare('SELECT cluster_id FROM articles WHERE url = ?').get(url)?.cluster_id;

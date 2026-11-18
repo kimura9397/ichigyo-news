@@ -10,7 +10,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { openDb } from '../src/db.mjs';
-import { importanceFor, refineCategory } from '../src/collector.mjs';
+import { importanceFor, refineCategory } from '../src/classify.mjs';
 
 const NOW = new Date().toISOString();
 let seq = 0;
