@@ -32,6 +32,7 @@ import {
 import type { CoverageKind, FeedTab, StoryRow } from './types'
 import Spotlight from './Spotlight'
 import SettingsMenu from './SettingsMenu'
+import PollingControls from './PollingControls'
 import './App.css'
 
 const TABS: { id: FeedTab; label: string; hint: string }[] = [
@@ -1187,40 +1188,12 @@ function App() {
             {bgRefreshing ? (
               <span className="refreshing-note">背後で更新中…</span>
             ) : null}
-            <div className="util-set">
-              <button
-                type="button"
-                className="switch"
-                role="switch"
-                aria-checked={polling}
-                onClick={() => void applyPolling(!polling, pollMinutes)}
-                title="ポーリング（一定間隔で自動更新）"
-              >
-                <span className="switch-track">
-                  <span className="switch-thumb" />
-                </span>
-                <span className="switch-label">ポーリング</span>
-              </button>
-              {polling ? (
-                <div
-                  className="segmented"
-                  role="group"
-                  aria-label="ポーリング間隔"
-                >
-                  {POLL_INTERVALS.map((m) => (
-                    <button
-                      key={m}
-                      type="button"
-                      className={pollMinutes === m ? 'seg is-active' : 'seg'}
-                      onClick={() => void applyPolling(polling, m)}
-                      aria-pressed={pollMinutes === m}
-                    >
-                      {m}分
-                    </button>
-                  ))}
-                </div>
-              ) : null}
-            </div>
+            <PollingControls
+              polling={polling}
+              pollMinutes={pollMinutes}
+              pollIntervals={POLL_INTERVALS}
+              applyPolling={applyPolling}
+            />
             <button
               type="button"
               className="icon-btn"
