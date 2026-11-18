@@ -33,6 +33,8 @@ import type { CoverageKind, FeedTab, StoryRow } from './types'
 import Spotlight from './Spotlight'
 import SettingsMenu from './SettingsMenu'
 import PollingControls from './PollingControls'
+import SearchBar from './SearchBar'
+import WatchBar from './WatchBar'
 import './App.css'
 
 const TABS: { id: FeedTab; label: string; hint: string }[] = [
@@ -1502,67 +1504,22 @@ function App() {
       </div>
 
       {tab === 'search' ? (
-        <div className="search-bar">
-          <form className="search-form" onSubmit={submitSearch} role="search">
-            <input
-              className="search-input"
-              type="search"
-              value={searchInput}
-              onChange={(e) => setSearchInput(e.target.value)}
-              placeholder="キーワードを入力（例: 今田美桜）"
-              aria-label="検索キーワード"
-              maxLength={50}
-            />
-            <button type="submit" className="kw-add search-submit">
-              検索
-            </button>
-          </form>
-          {searchQuery ? (
-            keywords.includes(searchQuery) ? (
-              <button type="button" className="search-register" disabled>
-                「{searchQuery}」は登録済み
-              </button>
-            ) : (
-              <button
-                type="button"
-                className="search-register"
-                onClick={registerSearchKeyword}
-              >
-                「{searchQuery}」をキーワードに登録する
-              </button>
-            )
-          ) : null}
-        </div>
+        <SearchBar
+          searchInput={searchInput}
+          setSearchInput={setSearchInput}
+          submitSearch={submitSearch}
+          searchQuery={searchQuery}
+          keywords={keywords}
+          registerSearchKeyword={registerSearchKeyword}
+        />
       ) : null}
 
       {tab === 'watch' ? (
-        <div className="watch-bar" role="tablist" aria-label="キーワード">
-          <button
-            type="button"
-            role="tab"
-            aria-selected={watchKeyword === null}
-            className={
-              watchKeyword === null ? 'cat-chip is-active' : 'cat-chip'
-            }
-            onClick={() => selectWatchKeyword(null)}
-          >
-            すべて
-          </button>
-          {keywords.map((k) => (
-            <button
-              key={k}
-              type="button"
-              role="tab"
-              aria-selected={watchKeyword === k}
-              className={
-                watchKeyword === k ? 'cat-chip is-active' : 'cat-chip'
-              }
-              onClick={() => selectWatchKeyword(k)}
-            >
-              {k}
-            </button>
-          ))}
-        </div>
+        <WatchBar
+          keywords={keywords}
+          watchKeyword={watchKeyword}
+          selectWatchKeyword={selectWatchKeyword}
+        />
       ) : null}
 
       <div
