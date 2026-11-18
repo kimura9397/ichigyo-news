@@ -109,7 +109,7 @@ test('POST /api/polling で有効化でき、nextAt が間隔どおりに立つ'
 });
 
 test('/api/stories のレスポンスにも polling が載る', async () => {
-  const res = await fetch(`${BASE}/api/stories?tab=all&limit=10`);
+  const res = await fetch(`${BASE}/api/stories?tab=important&limit=10`);
   assert.equal(res.ok, true);
   const data = await res.json();
   assert.equal(data.polling.enabled, true);

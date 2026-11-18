@@ -48,7 +48,6 @@ export interface StoryRow {
 export type FeedTab =
   | 'important'
   | 'fresh'
-  | 'all'
   | 'editorials'
   | 'bookmarks'
   | 'watch'

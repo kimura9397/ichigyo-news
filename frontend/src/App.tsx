@@ -674,17 +674,15 @@ function App() {
         ? '新着'
         : tab === 'editorials'
           ? '社説'
-          : tab === 'all'
-            ? 'すべて'
-            : tab === 'bookmarks'
-              ? 'ブックマーク'
-              : tab === 'watch'
-                ? watchKeyword
-                  ? `キーワードウォッチ「${watchKeyword}」`
-                  : 'キーワードウォッチ'
-                : searchQuery
-                  ? `検索「${searchQuery}」`
-                  : 'キーワード検索'
+          : tab === 'bookmarks'
+            ? 'ブックマーク'
+            : tab === 'watch'
+              ? watchKeyword
+                ? `キーワードウォッチ「${watchKeyword}」`
+                : 'キーワードウォッチ'
+              : searchQuery
+                ? `検索「${searchQuery}」`
+                : 'キーワード検索'
   const page = pages[key] ?? null
 
   const loadPage = useCallback(

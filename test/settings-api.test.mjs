@@ -106,7 +106,7 @@ test('mute: 重要タブではミュートしたカテゴリが 行・total・�
 });
 
 test('mute: 重要タブ以外では無視される', async () => {
-  const data = await stories('tab=all&mute=スポーツ');
+  const data = await stories('tab=new&mute=スポーツ');
   assert.equal(data.total, 3);
 });
 

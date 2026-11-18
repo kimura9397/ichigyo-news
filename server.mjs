@@ -185,7 +185,7 @@ function tabWhere(tab, category, muted = [], keywords = []) {
   if (tab === 'important') {
     conds.push('c.importance_score >= ?'); params.push(IMPORTANT_THRESHOLD);
     // 重要タブは各ニュース（クラスタ）につき最新版の行だけを出す（2026-11-15 ユーザー承認）。
-    // 新着・すべてタブは全バージョンを行表示する従来どおり。
+    // 新着タブは全バージョンを行表示する従来どおり。
     conds.push('v.version_no = (SELECT MAX(v2.version_no) FROM versions v2 WHERE v2.cluster_id = c.id)');
     // カテゴリのミュート（設定メニュー、2026-11-15 ユーザー決定）: 重要タブのときだけ除外する。
     // muted は DB上のカテゴリ値（「その他」は ''）の配列。行・total・カテゴリ別件数で同じ条件を使う。
@@ -298,8 +298,8 @@ async function apiStories(url) {
   } else {
     kicked = kickRefreshIfStale();
   }
-  const tabParam = url.searchParams.get('tab') || 'all';
-  const tab = ['important', 'new', 'all', 'bookmarks', 'editorials', 'watch'].includes(tabParam) ? tabParam : 'all';
+  const tabParam = url.searchParams.get('tab') || 'important';
+  const tab = ['important', 'new', 'bookmarks', 'editorials', 'watch'].includes(tabParam) ? tabParam : 'important';
   const catParam = url.searchParams.get('category') || 'すべて';
   const category = ['すべて', ...CATEGORIES].includes(catParam) ? catParam : 'すべて';
   const limit = Math.min(500, Math.max(1, Number.parseInt(url.searchParams.get('limit') || '100', 10) || 100));
