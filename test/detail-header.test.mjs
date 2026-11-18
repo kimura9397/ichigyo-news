@@ -10,7 +10,10 @@ import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
-const appTsx = readFileSync(join(ROOT, 'frontend/src/App.tsx'), 'utf8');
+// 詳細ペインは StoryDetailPane.tsx に切り出し済み（App.tsx と合わせて対象にする）
+const appTsx =
+  readFileSync(join(ROOT, 'frontend/src/App.tsx'), 'utf8') +
+  readFileSync(join(ROOT, 'frontend/src/StoryDetailPane.tsx'), 'utf8');
 const appCss = readFileSync(join(ROOT, 'frontend/src/App.css'), 'utf8');
 
 function stripComments(css) {
