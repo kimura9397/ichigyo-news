@@ -2,7 +2,7 @@
   "name": "ichigyo-news",
   "license": "MIT",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.4.0",
   "description": "同じニュースを1行として読む新聞横断ビューア",
   "type": "module",
   "scripts": {
