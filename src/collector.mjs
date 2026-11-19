@@ -8,7 +8,7 @@ import { runLifecycle } from './lifecycle.mjs';
 import { normalizeForSearch, buildArticleSearchText } from './normalize.mjs';
 import { listKeywords } from './keywords.mjs';
 import { FEEDS, isWrapperUrl, normalizeSource, extractSourceFromTitle, cleanTitle, fetchFeed, feedFailureMessage } from './rss.mjs';
-import { bigrams, jaccard, matchScore, filterWeakBigrams, summaryWords, sharedCount, strongTerms, properTerms, hasStoryAnchor, isNumericOnlyRevision, isNewFactFollowUp, CLUSTER_THRESHOLD, CLUSTER_WINDOW_MS } from './matching.mjs';
+import { bigrams, jaccard, matchScore, filterWeakBigrams, summaryWords, sharedCount, strongTerms, properTerms, stripBoilerplate, hasStoryAnchor, isNumericOnlyRevision, isNewFactFollowUp, CLUSTER_THRESHOLD, CLUSTER_WINDOW_MS } from './matching.mjs';
 import { refineCategory, importanceFor } from './classify.mjs';
 
 // ---------- DB取り込み ----------
@@ -69,7 +69,7 @@ for (const c of db.prepare('SELECT id, title, last_seen_at, first_seen_at FROM c
     title: c.title,
     titleBg: filterWeakBigrams(bigrams(c.title)), articleBgs: [], summaryWords: new Set(),
     lastSeenMs: Date.parse(c.last_seen_at) || 0, firstSeenMs: Date.parse(c.first_seen_at) || 0,
-    allStrong: strongTerms(c.title), allProper: properTerms(c.title),
+    allStrong: strongTerms(stripBoilerplate(c.title)), allProper: properTerms(stripBoilerplate(c.title)),
   });
 }
 for (const a of db.prepare('SELECT cluster_id, title, summary FROM articles').all()) {
@@ -77,8 +77,11 @@ for (const a of db.prepare('SELECT cluster_id, title, summary FROM articles').al
   if (!entry) continue;
   entry.articleBgs.push(filterWeakBigrams(bigrams(cleanTitle(a.title, ''))));
   for (const w of summaryWords(a.summary)) entry.summaryWords.add(w);
-  for (const w of strongTerms(a.title)) entry.allStrong.add(w);
-  for (const w of properTerms(a.title)) entry.allProper.add(w);
+  // 強い語・固有名詞っぽい語の集合にも定型句（媒体サフィックス等）を持ち込まない。
+  // 「47NEWS」の "NEWS" のような語が残ると、要約バルブの固有名詞共有が
+  // 定型句だけで満たせてしまう（監査 2026-11-19）
+  for (const w of strongTerms(stripBoilerplate(a.title))) entry.allStrong.add(w);
+  for (const w of properTerms(stripBoilerplate(a.title))) entry.allProper.add(w);
 }
 const articleTitlesStmt = db.prepare('SELECT title FROM articles WHERE cluster_id = ?');
 for (const raw of items) {
@@ -89,8 +92,8 @@ const source = normalizeSource(raw.source || extractSourceFromTitle(raw.title));
 const title = cleanTitle(raw.title, source);
 const titleBg = filterWeakBigrams(bigrams(title));
 const itemSummaryWords = summaryWords(raw.summary);
-const itemStrong = strongTerms(title);
-const itemProper = properTerms(title);
+const itemStrong = strongTerms(stripBoilerplate(title));
+const itemProper = properTerms(stripBoilerplate(title));
 const itemMs = Date.parse(raw.publishedAt || nowIso) || now.getTime();
 let best = null;
 for (const [cid, entry] of clusterCache) {

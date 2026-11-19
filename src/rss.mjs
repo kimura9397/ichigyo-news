@@ -170,9 +170,30 @@ const m = String(title).match(/[-―–—]\s*([^-―–—]{2,20})$/);
 if (!m) return '';
 const suffix = m[1].trim();
 // スコア表記（例: 「森保J 3-2でブラジル相手に勝利」の「2で…」）を媒体名と
-// 誤認しない。数字で始まるサフィックスは媒体名ではない（Issue #21 実例）。
-if (/^[0-9０-９]/.test(suffix)) return '';
+// 誤認しない。数字で始まるサフィックスは原則として媒体名ではない（Issue #21 実例）。
+// ただし「47NEWS」のような数字始まりの媒体名は実在し、サフィックスとして残ると
+// 照合の接着剤になる（監査 2026-11-19）。数字＋英字だけで構成され、既知媒体名に
+// 正規化できるものだけを例外として媒体名と認める。
+if (/^[0-9０-９]/.test(suffix)) {
+const compact = suffix.replace(/[\s　]/g, '');
+if (!/^[0-9０-９]+[A-Za-zＡ-Ｚａ-ｚ]+$/.test(compact)) return '';
+if (normalizeSource(suffix) === suffix) return '';
+}
 return suffix;
+}
+
+/**
+ * 配信元らしい末尾表記か（既知媒体名を含む、または配信元の定型語で終わる）。
+ * strict の場合は、コロン区切りのように本文側にも現れやすい区切り向けに、
+ * 既知媒体名を含むか「ドットコム／ネットワーク」で終わる場合だけに絞る。
+ */
+function isSourceLikeTail(s, strict = false) {
+const t = String(s || '').trim();
+if (!t || t.length > 30) return false;
+if (normalizeSource(t) !== t) return true;
+if (/(ドットコム|ネットワーク)$/.test(t)) return true;
+if (strict) return false;
+return /(新聞|通信社|放送|テレビ|ラジオ|スポーツ|ニュース)$/.test(t);
 }
 
 export function normalizeSource(name) {
@@ -195,6 +216,13 @@ const suffix = extractSourceFromTitle(t);
 if (suffix && normalizeSource(suffix) === normalizeSource(source || suffix)) {
 t = t.slice(0, t.length - suffix.length).replace(/[-―–—]\s*$/, '').trim();
 }
+// 全角コロン区切りの配信元表記（例: 「…：時事ドットコム」）。ダッシュ区切りしか
+// 見ない extractSourceFromTitle では落ちず、残ると照合の接着剤になる（監査 2026-11-19）
+const colon = t.match(/^(.*?)[：:]\s*([^\s：:]{2,30})$/);
+if (colon && isSourceLikeTail(colon[2], true)) t = colon[1].trim();
+// 末尾の括弧書きの配信元表記（例: 「…（みんなの経済新聞ネットワーク）」「…（中日スポーツ）」）
+const paren = t.match(/^(.*?)[（(]([^（）()]{2,30})[）)]\s*$/);
+if (paren && isSourceLikeTail(paren[2])) t = paren[1].trim();
 return t;
 }
 
