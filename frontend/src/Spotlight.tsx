@@ -22,6 +22,10 @@
 // 時刻・天気・出典でサイズと揃えが混在して段差に見えたため、行全体の
 // 垂直位置を center に統一し、時刻と気温を大きく、日付と詳細を小さく
 // 従える二層の見た目に整えた（Issue #35）。
+// その後、細字が「カスカスに見える」という指摘を受け、候補モックから
+// 選ばれた案28（TV ニュースの隅表示の並び＋半透明チップ）に置き換えた
+// （Issue #39）: ブロック全体を1つのチップにまとめ、先頭に LIVE タグを
+// 置き、時刻と気温は太字にした。データ項目と並びは従来どおり。
 // 天気の表示には利用条件として open-meteo.com への CC BY 4.0 出典リンクを付ける。
 import { useEffect, useRef, useState } from 'react'
 import {
@@ -428,6 +432,7 @@ export default function Spotlight({
             </span>
           ) : null}
           <div className="spotlight-now">
+            <span className="spotlight-live">LIVE</span>
             <span className="spotlight-clockset">
               <span className="spotlight-date">{formatDateNow(now)}</span>
               <time className="spotlight-clock">{formatTimeNow(now)}</time>
@@ -442,8 +447,10 @@ export default function Spotlight({
                   <span className="spotlight-weather-label">{weather.label}</span>
                 </span>
                 <span className="spotlight-weather-sub">
-                  <span>{weatherLocationName}</span>
-                  {weatherDetail ? <span>{weatherDetail}</span> : null}
+                  <span>
+                    {weatherLocationName}
+                    {weatherDetail ? `　${weatherDetail}` : ''}
+                  </span>
                   <a
                     className="spotlight-weather-source"
                     href="https://open-meteo.com/"
