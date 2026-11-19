@@ -4,8 +4,52 @@
 
 // ---------- 類似度・新規性判定 ----------
 
+/**
+ * 配信元らしい末尾表記か（照合専用の判定。表示側の cleanTitle より広く取る）。
+ * 既知媒体名を含むか、配信元の定型語で終わるものを対象にする。
+ */
+function isOutletTail(s) {
+const t = String(s || '').trim();
+if (!t || t.length > 30) return false;
+if (/47NEWS/i.test(t)) return true;
+if (/(朝日|毎日|読売|産経|日経|日本経済新聞|時事|共同|NHK)/.test(t)) return true;
+return /(新聞|通信社|放送|テレビ|ラジオ|スポーツ|ニュース|ネットワーク|ドットコム|エンタメ)$/.test(t);
+}
+
+/**
+ * 照合前にタイトルから落とす定型句（2026-11-19 監査、Issue #53）。
+ * 媒体サフィックスや定型マーカーが残ると、そのバイグラムが接着剤になり、
+ * 無関係な記事同士が一致してしまう（実測: 「- 47NEWS」=5件、「：時事ドットコム」
+ * =6件、「（…ネットワーク）」=13件の共有バイグラム。無関係な速報同士の
+ * matchScore が 0.47〜0.53 に達していた）。表示用のタイトルは変えず、
+ * 照合に使う文字列だけから落とす。
+ */
+export function stripBoilerplate(title) {
+let t = String(title || '');
+// 【速報】【動画】等の定型マーカーは角括弧ごと落とす。括弧だけを落とすと
+// 「【速」「報】」のようなバイグラムが残り、弱文字フィルタ（両文字とも弱文字の
+// バイグラムだけを除去）をすり抜ける
+t = t.replace(/【[^】]{1,16}】/g, '');
+// 「画像・写真：」「写真：」等の前置き（配信元のページ種別表記）
+t = t.replace(/^(?:画像・写真|画像|写真|動画|映像)[：:]\s*/, '');
+// 末尾の配信元表記（ダッシュ区切り／全角コロン区切り／括弧書き）。
+// 「- エンタメ - ニュース」のような多段サフィックスに備えて、該当する間は繰り返す
+for (let i = 0; i < 3; i++) {
+const before = t;
+let m = t.match(/^(.*?)\s*[-―–—]\s*([^-―–—]{2,30})$/);
+if (m && isOutletTail(m[2])) t = m[1];
+m = t.match(/^(.*?)[：:]\s*([^\s：:]{2,30})$/);
+if (m && isOutletTail(m[2])) t = m[1];
+m = t.match(/^(.*?)[（(]([^（）()]{2,30})[）)]\s*$/);
+if (m && isOutletTail(m[2])) t = m[1];
+t = t.trim();
+if (t === before) break;
+}
+return t.trim();
+}
+
 export function normalizeForMatch(s) {
-return String(s)
+return stripBoilerplate(String(s))
 .replace(/[０-９]/g, (c) => String.fromCharCode(c.charCodeAt(0) - 0xfee0)) // 全角数字→半角
 .replace(/[0-9]+月[0-9]+日/g, '') // 日付表記は同一ニュース判定のノイズになるので落とす
 .replace(/[0-9]+時[0-9]+分/g, '')
@@ -132,7 +176,7 @@ return ANCHOR_GENRE_UNITS.has(text) || /人(死亡|けが|負傷|搬送|重傷|�
 }
 
 function anchorUnits(title) {
-return topicUnits(title).filter((u) => !ANCHOR_GENERIC_UNITS.has(u.text) && !ANCHOR_GENERIC_UNIT_RE.test(u.text));
+return topicUnits(stripBoilerplate(title)).filter((u) => !ANCHOR_GENERIC_UNITS.has(u.text) && !ANCHOR_GENERIC_UNIT_RE.test(u.text));
 }
 
 function anchorSharesAny(a, b) {

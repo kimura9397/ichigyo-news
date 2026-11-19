@@ -9,7 +9,7 @@
 //   purgeBodyData で消去する（サーバー起動時と refresh のライフサイクルで実行、冪等）。
 import { editorialRelated } from './editorials.mjs';
 import { importanceFor, refineCategory } from './classify.mjs';
-import { bigrams, filterWeakBigrams, matchScore, jaccard, strongTerms, summaryWords, hasStoryAnchor, isNumericOnlyRevision } from './matching.mjs';
+import { bigrams, filterWeakBigrams, matchScore, jaccard, strongTerms, summaryWords, stripBoilerplate, hasStoryAnchor, isNumericOnlyRevision } from './matching.mjs';
 import { normalizeForSearch, buildArticleSearchText } from './normalize.mjs';
 
 export const RETENTION_DAYS = 7;
@@ -184,7 +184,7 @@ export function splitOverMergedClusters(db) {
       const versions = versionsStmt.all(c.id);
       if (!versions.length) continue;
       const titleBg = filterWeakBigrams(bigrams(c.title));
-      const titleStrong = strongTerms(c.title);
+      const titleStrong = strongTerms(stripBoilerplate(c.title));
       const v1 = v1Stmt.get(c.id);
       const v1Words = new Set();
       if (v1) for (const a of artsStmt.all(v1.id)) for (const w of summaryWords(a.summary)) v1Words.add(w);
@@ -193,7 +193,7 @@ export function splitOverMergedClusters(db) {
         if (matchScore(vBg, titleBg) > 0) continue;
         if (jaccard(vBg, titleBg) >= 0.05) continue;
         let sharedStrong = 0;
-        for (const t of strongTerms(v.title)) if (titleStrong.has(t)) sharedStrong++;
+        for (const t of strongTerms(stripBoilerplate(v.title))) if (titleStrong.has(t)) sharedStrong++;
         if (sharedStrong > 0) continue;
         const arts = artsStmt.all(v.id);
         if (!arts.length) continue;
