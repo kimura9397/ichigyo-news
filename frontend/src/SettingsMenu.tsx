@@ -1,10 +1,16 @@
 import {
   useEffect,
   useRef,
+  useState,
   type Dispatch,
   type SetStateAction,
 } from 'react'
 import type { DensitySetting, FontSizeSetting, ThemePreset } from './App'
+import type { WeatherLocation } from './api'
+import { CITIES, type CityEntry } from './cities'
+
+/** 市区町村の表示名（都道府県＋市区町村）。同名市区町村の取り違えを防ぐ。 */
+const cityLabel = (c: CityEntry) => `${c.pref} ${c.name}`
 
 interface SettingsMenuProps {
   menuOpen: boolean
@@ -38,6 +44,10 @@ interface SettingsMenuProps {
   formatBytes: (bytes: number) => string
   maintaining: boolean
   setConfirmingMaintenance: Dispatch<SetStateAction<boolean>>
+  /** 天気の場所（サーバー側に保存された現在値） */
+  weatherLocation: WeatherLocation
+  /** 天気の場所の変更（同梱リストから選んだ1件をサーバーへ保存する） */
+  onSelectWeatherCity: (city: WeatherLocation) => void
 }
 
 /**
@@ -72,8 +82,34 @@ export default function SettingsMenu(props: SettingsMenuProps) {
     formatBytes,
     maintaining,
     setConfirmingMaintenance,
+    weatherLocation,
+    onSelectWeatherCity,
   } = props
   const menuRef = useRef<HTMLDivElement | null>(null)
+
+  // 天気の場所の検索欄。同梱リストの表示名と完全一致した時点で選択として
+  // サーバーへ保存する（入力途中の文字列は保存しない）。地名の照合は
+  // このリストの中だけで行い、外部へは送らない。
+  const currentCity = CITIES.find((c) => c.code === weatherLocation.code)
+  const [cityText, setCityText] = useState(() =>
+    currentCity ? cityLabel(currentCity) : weatherLocation.name,
+  )
+  useEffect(() => {
+    setCityText(currentCity ? cityLabel(currentCity) : weatherLocation.name)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [weatherLocation])
+  const handleCityText = (text: string) => {
+    setCityText(text)
+    const hit = CITIES.find((c) => cityLabel(c) === text.trim())
+    if (hit) {
+      onSelectWeatherCity({
+        code: hit.code,
+        name: `${hit.pref}${hit.name}`,
+        lat: hit.lat,
+        lng: hit.lng,
+      })
+    }
+  }
 
   // 設定メニューは外側クリックと Esc で閉じる
   useEffect(() => {
@@ -249,6 +285,29 @@ export default function SettingsMenu(props: SettingsMenuProps) {
                         </span>
                       </button>
                     </div>
+                  </section>
+                  <section className="menu-section">
+                    <h3>天気</h3>
+                    <div className="menu-row is-stack">
+                      <span className="menu-label">天気の場所</span>
+                      <input
+                        className="kw-input"
+                        type="text"
+                        list="weather-city-list"
+                        value={cityText}
+                        onChange={(e) => handleCityText(e.target.value)}
+                        placeholder="市区町村名で検索"
+                        aria-label="天気の場所（市区町村）"
+                      />
+                      <datalist id="weather-city-list">
+                        {CITIES.map((c) => (
+                          <option key={c.code} value={cityLabel(c)} />
+                        ))}
+                      </datalist>
+                    </div>
+                    <p className="menu-note">
+                      スポットライトに表示する天気の場所です。市区町村名は外部に送信されず、選んだ場所の緯度経度だけを天気の取得（Open-Meteo）に使います。
+                    </p>
                   </section>
                   <section className="menu-section">
                     <h3>重要タブに出さないカテゴリ</h3>
