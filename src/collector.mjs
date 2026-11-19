@@ -131,21 +131,26 @@ for (const [cid, entry] of clusterCache) {
   if (!best || maxSim > best.sim) best = { id: cid, sim: maxSim };
 }
 let clusterId, versionId;
+let joinedCluster = false;
 if (best && best.sim >= CLUSTER_THRESHOLD) {
-clusterId = best.id;
-const vRows = db.prepare('SELECT id, version_no, title FROM versions WHERE cluster_id = ? ORDER BY version_no').all(clusterId);
+const vRows = db.prepare('SELECT id, version_no, title FROM versions WHERE cluster_id = ? ORDER BY version_no').all(best.id);
 const vTitles = vRows.map((r) => r.title);
 const latest = vRows[vRows.length - 1];
-const clusterTitle = clusterCache.get(clusterId)?.title || '';
-const articleTitles = articleTitlesStmt.all(clusterId).map((r) => r.title);
+const clusterTitle = clusterCache.get(best.id)?.title || '';
+const articleTitles = articleTitlesStmt.all(best.id).map((r) => r.title);
 if (isNewFactFollowUp(vTitles, title, { clusterTitle, articleTitles })) {
-const info = db.prepare('INSERT INTO versions (cluster_id, version_no, title, created_at) VALUES (?, ?, ?, ?)').run(clusterId, latest.version_no + 1, title, nowIso);
+const info = db.prepare('INSERT INTO versions (cluster_id, version_no, title, created_at) VALUES (?, ?, ?, ?)').run(best.id, latest.version_no + 1, title, nowIso);
+clusterId = best.id;
 versionId = Number(info.lastInsertRowid);
+joinedCluster = true;
 } else {
-// 新版を作らない記事は、タイトルが最も似た既存バージョンに入れる。従来は無条件に
-// 最新版へ入れていたため、誤って作られた最新版に正当な記事が積み上がり、その版が
-// 実在の続報のように見える状態を招いていた。全て類似0なら従来どおり最新版に入れる。
-let target = latest;
+// 新版を作らない記事は、タイトルが最も似た既存バージョンに入れる。ただし
+// 振り分け先の版との matchScore > 0 を必須とする（2026-11-19 監査、Issue #53）。
+// 従来は全て類似0でも最新版へ無条件に入れていたため、クラスタ照合の弱い一致で
+// 紛れ込んだ記事が既存版の中に静かに混ざり続けていた（版へのダンプ）。
+// どの版とも一致しない記事はクラスタ参加自体を取り消し、下の新規クラスタ
+// 作成に落とす（設計原則: 迷ったら分ける。誤合体の削減を優先し、分割過多は許容）。
+let target = null;
 let bestScore = 0;
 for (const v of vRows) {
 const s = matchScore(titleBg, filterWeakBigrams(bigrams(v.title)));
@@ -154,18 +159,27 @@ if (s > bestScore) { bestScore = s; target = v; }
 // 数値の改訂だけの記事は現在版（最新版）に取り込み、版の代表見出しを新しい方へ
 // 更新する（古い速報値の見出しが版の顔として残り続けないようにする）。
 // 判定は最新版の見出しに対して行い、錨が無い記事（別ニュースの紛れ込み）は
-// 代表見出しを書き換えない。
-if (hasStoryAnchor(title, clusterTitle, vTitles, articleTitles) && isNumericOnlyRevision([latest.title], title)) {
+// 代表見出しを書き換えない。改訂は定義上、最新版と数値以外の文面をほぼ共有
+// するため、この経路も最新版との matchScore > 0 を条件にする。
+if (hasStoryAnchor(title, clusterTitle, vTitles, articleTitles) && isNumericOnlyRevision([latest.title], title)
+&& matchScore(titleBg, filterWeakBigrams(bigrams(latest.title))) > 0) {
 target = latest;
 if (latest.title !== title) {
 db.prepare('UPDATE versions SET title = ? WHERE id = ?').run(title, latest.id);
 latest.title = title;
 }
 }
+if (target) {
+clusterId = best.id;
 versionId = target.id;
+joinedCluster = true;
 }
+}
+if (joinedCluster) {
 db.prepare('UPDATE clusters SET last_seen_at = ? WHERE id = ?').run(nowIso, clusterId);
-} else {
+}
+}
+if (!joinedCluster) {
 const info = db.prepare('INSERT INTO clusters (title, title_norm, category, first_seen_at, last_seen_at) VALUES (?, ?, ?, ?, ?)').run(title, normalizeForSearch(title), refineCategory(title, raw.category || ''), raw.publishedAt || nowIso, nowIso);
 clusterId = Number(info.lastInsertRowid);
 const v = db.prepare('INSERT INTO versions (cluster_id, version_no, title, created_at) VALUES (?, 1, ?, ?)').run(clusterId, title, nowIso);

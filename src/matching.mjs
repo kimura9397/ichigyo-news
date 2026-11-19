@@ -217,15 +217,28 @@ return n;
 * 裏付け（support）は記事タイトル側で数える。同一見出しを複数媒体が報じている場合は
 * それぞれ独立した裏付けとして数える（記事タイトルの多重集合で数えるのはそのため）。
 * versionTitles は版タイトル（[0] が v1）、articleTitles はクラスタ所属記事のタイトル。
+*
+* strict は修復パス（splitForeignVersions）専用の厳しい物差し（2026-11-19、Issue #53）。
+* 取り込みと同じ物差しで再判定すると、取り込みで通った誤合体を修復でも通してしまい
+* 自己修復が起きないため、修復側だけ次を締める:
+* - P0 の候補側包含率を、標題・版タイトルに対しては 0.45 以上（取り込みは 0.3）、
+*   記事タイトルに対しては 0.35 以上とし、短いベースへの免除はしない。記事タイトル
+*   への P0 自体は残す: 見出しが大きく乖離した正当な続報は、受理済み版の記事とだけ
+*   似る形で連鎖することがあり（枚方の実例）、ここを消すと正当な版の連鎖が割れる。
+*   修復のベースに積まれる記事は受理済み版のものだけなので、連鎖の足場は限られる
+* - P0s（短いベース見出し向けの救済）は使わない
+* - P7 のベース側包含率を 0.25 → 0.40 に上げる
+* 裏付けを使う経路（P1〜P6）はそのまま残す。固有名詞＋役職名の共有だけで通る
+* 別ニュース（企業名＋CEO 等）はこの物差しでも残る既知の限界（監査の理由5）。
 */
-export function hasStoryAnchor(newTitle, clusterTitle, versionTitles = [], articleTitles = []) {
+export function hasStoryAnchor(newTitle, clusterTitle, versionTitles = [], articleTitles = [], { strict = false } = {}) {
 const candUnits = anchorUnits(newTitle);
 const baseAll = [...new Set([clusterTitle, ...versionTitles, ...articleTitles].filter(Boolean))];
 if (!candUnits.length || !baseAll.length) return false;
 const nb = filterWeakBigrams(bigrams(newTitle));
 for (const t of baseAll) {
 const tb = filterWeakBigrams(bigrams(t));
-if (tb.size > 0 && tb.size <= 8) {
+if (!strict && tb.size > 0 && tb.size <= 8) {
 let inter = 0;
 for (const x of nb) if (tb.has(x)) inter++;
 if (inter >= 3 && inter / tb.size >= 0.5) return true; // P0s
@@ -233,7 +246,11 @@ if (inter >= 3 && inter / tb.size >= 0.5) return true; // P0s
 if (matchScore(nb, tb) > 0) {
 let inter = 0;
 for (const x of nb) if (tb.has(x)) inter++;
-if (nb.size && (inter / nb.size >= 0.3 || tb.size <= 8)) return true; // P0
+if (!nb.size) continue;
+if (strict) {
+const isTitleBase = t === clusterTitle || versionTitles.includes(t);
+if (inter / nb.size >= (isTitleBase ? 0.45 : 0.35)) return true; // P0 (strict)
+} else if (inter / nb.size >= 0.3 || tb.size <= 8) return true; // P0
 }
 }
 const titleUnits = anchorUnits(clusterTitle);
@@ -246,7 +263,7 @@ if (exact >= 1) {
 const tb = filterWeakBigrams(bigrams(clusterTitle));
 let inter = 0;
 for (const x of nb) if (tb.has(x)) inter++;
-if (tb.size && inter >= 4 && inter / tb.size >= 0.25) return true; // P7
+if (tb.size && inter >= 4 && inter / tb.size >= (strict ? 0.40 : 0.25)) return true; // P7
 }
 }
 const coreUnits = [...titleUnits, ...anchorUnits(versionTitles[0] || '')];

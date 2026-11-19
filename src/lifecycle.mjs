@@ -227,8 +227,14 @@ export function splitOverMergedClusters(db) {
  * 独立クラスタへ切り出す保守処理（2026-11-16、バージョン誤判定対策）。
  * splitOverMergedClusters はバイグラムの実質一致ゼロを条件とするため、タイトル同士が
  * 弱く似ている別ニュース（別の会社の情報漏えい、別のひき逃げ事件、定型の速報など）は
- * 拾えない。こちらは取り込み側と同じアンカー判定（hasStoryAnchor）で版ごとに
- * 「同じ話か」を判定し直す。
+ * 拾えない。こちらはアンカー判定（hasStoryAnchor）で版ごとに「同じ話か」を判定し直す。
+ * ただし修復側は strict（修復専用の厳しい物差し）で判定する。取り込みと全く同じ
+ * 物差しでは、取り込みで通った誤合体を修復でも通してしまい自己修復が起きない
+ * （監査 2026-11-19）。strict では P0 の候補側包含率を引き上げ（標題・版タイトル
+ * に対して 0.45、記事タイトルに対して 0.35。取り込みは一律 0.3＋短いベースへの
+ * 免除あり）、短いベースへの救済（P0s）と P7 の緩い包含率を使わない。定型句除去
+ * （照合前の stripBoilerplate）と合わせ、既存DBの汚染をライフサイクルのたびに
+ * 遡って分割できる。
  * 進め方: 版を若い順に見て、正当と判断した版だけをアンカーのベースに加える。
  * 誤った版をベースに含めると誤り同士が裏付け合って残る（連鎖）ため、切り出した版や
  * 混在型の版のタイトルはベースに加えない。
@@ -262,7 +268,7 @@ export function splitForeignVersions(db) {
       const baseSummaryWords = new Set();
       const addSummaryWords = (arts) => { for (const a of arts) for (const w of summaryWords(a.summary)) baseSummaryWords.add(w); };
       const articleAnchored = (a, titleOnly = false) => {
-        if (hasStoryAnchor(a.title, c.title, baseVersionTitles, baseArticleTitles)) return true;
+        if (hasStoryAnchor(a.title, c.title, baseVersionTitles, baseArticleTitles, { strict: true })) return true;
         if (titleOnly) return false;
         let n = 0;
         for (const w of summaryWords(a.summary)) if (baseSummaryWords.has(w)) n++;
@@ -282,7 +288,7 @@ export function splitForeignVersions(db) {
         // 版内全記事の要約の和集合は、ベース側の語彙が大きいほど汎用語で簡単に閾値を
         // 超えてしまう（実例: 原爆民衆法廷の版が政治資金クラスタの要約語彙と13語を共有
         // していた）。要約バルブは記事単位の混在判定でのみ使う。
-        const anchored = hasStoryAnchor(v.title, c.title, baseVersionTitles, baseArticleTitles);
+        const anchored = hasStoryAnchor(v.title, c.title, baseVersionTitles, baseArticleTitles, { strict: true });
         if (anchored) {
           baseVersionTitles.push(v.title);
           for (const a of arts) baseArticleTitles.push(a.title);
