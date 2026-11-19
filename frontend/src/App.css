@@ -1436,8 +1436,24 @@
   animation: spotlight-notice-in 0.25s ease;
 }
 
+/* 前へ／次へボタン（Issue #41）。時刻＋天気チップの左に並べる。
+   トップバーの右寄せの起点はこのグループが持ち、チップはその右に続く */
+.spotlight-nav {
+  flex: none;
+  margin-inline-start: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* 無効化は「移動先がない（1件以下）」ためであり処理中ではないので、
+   .icon-btn の既定の cursor: wait は使わず通常のカーソルに戻す */
+.spotlight-nav .icon-btn:disabled {
+  cursor: default;
+}
+
 /* 現在時刻と天気（Issue #28、見た目を Issue #35 で二層に整え、Issue #39 で
-   チップ型に変更）。トップバーの右寄せの起点として出す。全画面ボタンは
+   チップ型に変更）。前へ／次へボタン（Issue #41）の右に続けて出す。全画面ボタンは
    この右に続く（既定の margin-inline-start: auto は打ち消す）。
    Issue #35 の二層表示が「細字でカスカスに見える」という指摘を受け、
    候補モックから選ばれた案28（TV ニュースの隅表示の並び＋半透明チップ）
@@ -1445,7 +1461,6 @@
    LIVE タグを置き、時刻・気温は太字にする。チップの地は「薄める方向の
    混色ベース」(--tint-base) を半透明に混ぜたもので、全テーマに追随する */
 .spotlight-now {
-  margin-inline-start: auto;
   display: flex;
   flex-wrap: wrap;
   align-items: center;
