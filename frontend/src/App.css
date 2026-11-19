@@ -978,6 +978,79 @@
   font-weight: 650;
 }
 
+/* 更新通知（Issue #26）: 新しい版がある時だけ出る黄色い「!」と、
+   マウスオーバーで開くパネル。黄色はテーマに依らない注意色として固定する */
+.update-notice {
+  position: relative;
+  display: inline-flex;
+}
+
+.update-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 999px;
+  background: #f5b921;
+  color: #1c1712;
+  font-size: 19px;
+  font-weight: 800;
+  line-height: 1;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.update-badge:hover,
+.update-badge:focus-visible {
+  background: #ffc82e;
+}
+
+.update-panel {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 50;
+  width: min(360px, 86vw);
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--paper);
+  color: var(--ink);
+  box-shadow: 0 8px 28px rgb(0 0 0 / 0.28);
+  text-align: start;
+}
+
+.update-panel-title {
+  margin: 0;
+  font-size: calc(13px * var(--font-scale));
+  font-weight: 700;
+}
+
+.update-panel-date {
+  margin-inline-start: 8px;
+  font-size: calc(11px * var(--font-scale));
+  font-weight: 400;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.update-panel-notes {
+  margin-top: 8px;
+  max-height: 240px;
+  overflow-y: auto;
+  font-size: calc(12px * var(--font-scale));
+  line-height: 1.65;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.update-panel-foot {
+  margin: 10px 0 0;
+  font-size: calc(11px * var(--font-scale));
+  color: var(--muted);
+}
+
 /* --- 設定メニュー（ハンバーガー）と既読の薄表示 --- */
 
 /* 既読を薄く表示する設定が ON のとき、詳細を開いたクラスタの行を薄くする */

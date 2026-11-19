@@ -16,6 +16,8 @@ import { addBookmark, removeBookmark, isBookmarked, recordRead, foldOldReadEvent
 import { normalizeForSearch } from './src/normalize.mjs';
 import { listKeywords, addKeyword as addKeywordToDb, removeKeyword as removeKeywordFromDb } from './src/keywords.mjs';
 import { runningAsSea, readSeaAsset, defaultDataDir, openBrowser } from './src/sea.mjs';
+import { APP_VERSION } from './src/version.mjs';
+import { checkLatestRelease, LATEST_RELEASE_URL } from './src/update-check.mjs';
 
 // SEA 実行時は import.meta.url が得られないため、その場合は cwd を基点にする
 // （SEA では静的配信も DB パスも ROOT を使わないので、基点はダミーでよい）。
@@ -142,6 +144,16 @@ function restorePolling() {
   schedulePoll();
 }
 restorePolling();
+
+/* ---------- 更新通知（起動時に1回だけ確認、Issue #26） ---------- */
+// GitHub Releases の latest を起動時に1回だけ確認し、現行バージョンより
+// 新しい版がある場合だけ /api/status の update に載せる。ポーリングには
+// 相乗りさせない。取得に失敗したら update は null のまま（何も知らせない）。
+// 確認先はテスト用に環境変数で差し替えられる（通常は GitHub API のまま）。
+const UPDATE_CHECK_URL = process.env.ICHIGYO_UPDATE_CHECK_URL || LATEST_RELEASE_URL;
+let updateInfo = null;
+void checkLatestRelease({ currentVersion: APP_VERSION, url: UPDATE_CHECK_URL })
+  .then((info) => { updateInfo = info; });
 
 // 背景社説チェック: refresh 完了後、重要タブ上位クラスタの社説を裏で確認する（refresh はブロックしない）
 let editorialBatchRunning = false;
@@ -488,7 +500,7 @@ const server = createServer(async (req, res) => {
     }
     if (p === '/api/status' && req.method === 'GET') {
       const counts = db.prepare('SELECT (SELECT COUNT(*) FROM clusters) AS clusters, (SELECT COUNT(*) FROM versions) AS versions, (SELECT COUNT(*) FROM articles) AS articles').get();
-      return sendJson(res, 200, { lastRun: lastFinishedRun(), counts, refreshing: refreshing !== null, db_bytes: dbBytes(), polling: pollingStatus() });
+      return sendJson(res, 200, { lastRun: lastFinishedRun(), counts, refreshing: refreshing !== null, db_bytes: dbBytes(), polling: pollingStatus(), update: updateInfo });
     }
     // 静的配信: デコード＋正規化し、public/ 配下から出るパスは拒否する
     let rel;

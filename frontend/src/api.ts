@@ -523,6 +523,41 @@ function pollingFromRaw(raw: RawPolling | undefined): PollingState {
   }
 }
 
+/* ---------- 更新通知（起動時にサーバーが1回だけ確認、Issue #26） ---------- */
+
+/** 新しい版がある時だけサーバーから渡される更新情報。なければ null。 */
+export interface UpdateInfo {
+  /** 新しい版のバージョン（'v' なし、例 '0.5.0'） */
+  version: string
+  /** リリースページのURL */
+  url: string
+  /** リリースノート本文（GitHub Releases の body、そのまま） */
+  notes: string
+  /** リリースの公開日時（ISO）。なければ null */
+  publishedAt: string | null
+}
+
+interface RawUpdate {
+  version?: string
+  url?: string
+  notes?: string
+  publishedAt?: string | null
+}
+
+/** 更新情報の生レスポンス→画面モデル変換（純粋関数。テストからも使うため公開する）。
+ *  版が無い・URLが不正なら null（何も出さない）。 */
+export function updateFromRaw(raw: RawUpdate | null | undefined): UpdateInfo | null {
+  if (!raw || typeof raw.version !== 'string' || !raw.version) return null
+  const url = safeUrl(raw.url)
+  if (!url) return null
+  return {
+    version: raw.version,
+    url,
+    notes: typeof raw.notes === 'string' ? raw.notes : '',
+    publishedAt: typeof raw.publishedAt === 'string' ? raw.publishedAt : null,
+  }
+}
+
 export interface ServerStatus {
   dbBytes: number
   refreshing: boolean
@@ -530,6 +565,8 @@ export interface ServerStatus {
   lastRunId: number | null
   lastRunFinishedAt: string | null
   polling: PollingState
+  /** 新しい版がある時だけ非 null（更新通知、Issue #26） */
+  update: UpdateInfo | null
 }
 
 /** サーバーのステータス（DB容量・収集中か・最終収集・ポーリング状態）を取得する。 */
@@ -539,6 +576,7 @@ export async function fetchServerStatus(): Promise<ServerStatus> {
     refreshing?: boolean
     lastRun?: { id?: number; finished_at?: string } | null
     polling?: RawPolling
+    update?: RawUpdate | null
   }>('/api/status')
   return {
     dbBytes: data.db_bytes ?? 0,
@@ -546,6 +584,7 @@ export async function fetchServerStatus(): Promise<ServerStatus> {
     lastRunId: typeof data.lastRun?.id === 'number' ? data.lastRun.id : null,
     lastRunFinishedAt: data.lastRun?.finished_at ?? null,
     polling: pollingFromRaw(data.polling),
+    update: updateFromRaw(data.update),
   }
 }
 

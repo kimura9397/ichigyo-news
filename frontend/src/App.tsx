@@ -27,11 +27,13 @@ import {
   setPollingRemote,
   versionsOfEvent,
   type PollingState,
+  type UpdateInfo,
 } from './api'
 import type { CoverageKind, FeedTab, StoryRow } from './types'
 import Spotlight from './Spotlight'
 import SettingsMenu from './SettingsMenu'
 import PollingControls from './PollingControls'
+import UpdateNotice from './UpdateNotice'
 import SearchBar from './SearchBar'
 import WatchBar from './WatchBar'
 import StoryListPane from './StoryListPane'
@@ -152,6 +154,8 @@ function App() {
   const [refreshing, setRefreshing] = useState(false)
   const [bgRefreshing, setBgRefreshing] = useState(false)
   const [dbBytes, setDbBytes] = useState<number | null>(null)
+  // 更新通知（Issue #26）: 新しい版がある時だけサーバーから渡される。なければ null で何も出さない
+  const [updateInfo, setUpdateInfo] = useState<UpdateInfo | null>(null)
   const [maintaining, setMaintaining] = useState(false)
   // データ整理（保守）の確認ダイアログと、実行結果のトースト
   const [confirmingMaintenance, setConfirmingMaintenance] = useState(false)
@@ -626,6 +630,7 @@ function App() {
     fetchServerStatus()
       .then((s) => {
         setDbBytes(s.dbBytes)
+        setUpdateInfo(s.update)
         applyServerPolling(s.polling)
         if (lastRunIdRef.current === null) lastRunIdRef.current = s.lastRunId
       })
@@ -1174,6 +1179,7 @@ function App() {
             {bgRefreshing ? (
               <span className="refreshing-note">背後で更新中…</span>
             ) : null}
+            {updateInfo ? <UpdateNotice update={updateInfo} /> : null}
             <PollingControls
               polling={polling}
               pollMinutes={pollMinutes}
