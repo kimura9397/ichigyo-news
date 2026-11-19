@@ -1436,22 +1436,42 @@
   animation: spotlight-notice-in 0.25s ease;
 }
 
-/* 現在時刻と天気（Issue #28、見た目を Issue #35 で整えた）。トップバーの
-   右寄せの起点として出す。全画面ボタンはこの右に続く（既定の
-   margin-inline-start: auto は打ち消す）。時刻・天気・出典でサイズと
-   揃えが混在して段差に見えたため、行全体の垂直位置を center に統一し、
-   主（時刻・気温は大きく細く）／従（日付・詳細・出典は小さく muted）の
-   二層に分けた */
+/* 現在時刻と天気（Issue #28、見た目を Issue #35 で二層に整え、Issue #39 で
+   チップ型に変更）。トップバーの右寄せの起点として出す。全画面ボタンは
+   この右に続く（既定の margin-inline-start: auto は打ち消す）。
+   Issue #35 の二層表示が「細字でカスカスに見える」という指摘を受け、
+   候補モックから選ばれた案28（TV ニュースの隅表示の並び＋半透明チップ）
+   に置き換えた: 時刻＋天気のブロック全体を1つのチップにまとめ、先頭に
+   LIVE タグを置き、時刻・気温は太字にする。チップの地は「薄める方向の
+   混色ベース」(--tint-base) を半透明に混ぜたもので、全テーマに追随する */
 .spotlight-now {
   margin-inline-start: auto;
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 6px 20px;
+  gap: 6px 16px;
+  background: color-mix(in srgb, var(--tint-base) 55%, transparent);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 8px 16px;
 }
 
 .spotlight-now + .spotlight-fullscreen {
   margin-inline-start: 0;
+}
+
+/* LIVE タグ（スポットライト表示中＝ライブの印）。朱地に紙色の文字で、
+   停止ボタンと同じ色の組み合わせにする */
+.spotlight-live {
+  flex: none;
+  background: var(--vermillion);
+  color: var(--paper);
+  border-radius: 3px;
+  padding: 2px 8px;
+  font-size: calc(10.5px * var(--font-scale));
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  white-space: nowrap;
 }
 
 /* 日付（小）＋時刻（大）の組。縦に積み、行内では center で揃える */
@@ -1464,14 +1484,15 @@
 
 .spotlight-date {
   font-size: calc(11px * var(--font-scale));
+  font-weight: 600;
   letter-spacing: 0.08em;
   color: var(--muted);
   white-space: nowrap;
 }
 
 .spotlight-clock {
-  font-size: calc(30px * var(--font-scale));
-  font-weight: 300;
+  font-size: calc(32px * var(--font-scale));
+  font-weight: 700;
   letter-spacing: 0.04em;
   color: var(--ink);
   font-variant-numeric: tabular-nums;
@@ -1499,14 +1520,15 @@
 }
 
 .spotlight-weather-temp {
-  font-size: calc(24px * var(--font-scale));
-  font-weight: 300;
+  font-size: calc(25px * var(--font-scale));
+  font-weight: 700;
   color: var(--ink);
   font-variant-numeric: tabular-nums;
 }
 
 .spotlight-weather-label {
   font-size: calc(12.5px * var(--font-scale));
+  font-weight: 600;
   color: var(--muted);
 }
 
