@@ -245,9 +245,11 @@ export function splitOverMergedClusters(db) {
  * 使うが、記事が1件だけの版では混在があり得ないためタイトルアンカーだけで決める。
  * 混在型（版タイトルは別ニュースだが記事の大半は元の話）は版単位では安全に切り分け
  * られないため残し、正当な記事だけをベースに加える。
+ * オプション p0Base は hasStoryAnchor の P0 ベース実験（Issue #56）を修復側にも
+ * 通すためのもので、通常の保守実行では渡さない（既定の物差しで判定する）。
  * 切り出した版の数を返す。
  */
-export function splitForeignVersions(db) {
+export function splitForeignVersions(db, { p0Base } = {}) {
   const clusters = db.prepare('SELECT id, title, category FROM clusters').all();
   if (!clusters.length) return 0;
   const versionsStmt = db.prepare('SELECT id, version_no, title FROM versions WHERE cluster_id = ? ORDER BY version_no');
@@ -265,10 +267,13 @@ export function splitForeignVersions(db) {
       if (versions.length < 2) continue;
       const baseVersionTitles = [];
       const baseArticleTitles = [];
+      // P0 の足場にできる記事（'articles-vetted' 用）: アンカーを通過して受理された
+      // 版の記事だけを積む。v1 は無条件に受理されるため、その記事は足場にしない
+      const baseP0ArticleTitles = [];
       const baseSummaryWords = new Set();
       const addSummaryWords = (arts) => { for (const a of arts) for (const w of summaryWords(a.summary)) baseSummaryWords.add(w); };
       const articleAnchored = (a, titleOnly = false) => {
-        if (hasStoryAnchor(a.title, c.title, baseVersionTitles, baseArticleTitles, { strict: true })) return true;
+        if (hasStoryAnchor(a.title, c.title, baseVersionTitles, baseArticleTitles, { strict: true, p0Base, p0ArticleTitles: baseP0ArticleTitles })) return true;
         if (titleOnly) return false;
         let n = 0;
         for (const w of summaryWords(a.summary)) if (baseSummaryWords.has(w)) n++;
@@ -280,6 +285,7 @@ export function splitForeignVersions(db) {
         if (isFirst) {
           baseVersionTitles.push(v.title);
           for (const a of arts) baseArticleTitles.push(a.title);
+          // v1 の記事は baseP0ArticleTitles には積まない（無条件受理のため未検証）
           addSummaryWords(arts);
           isFirst = false;
           continue;
@@ -288,10 +294,10 @@ export function splitForeignVersions(db) {
         // 版内全記事の要約の和集合は、ベース側の語彙が大きいほど汎用語で簡単に閾値を
         // 超えてしまう（実例: 原爆民衆法廷の版が政治資金クラスタの要約語彙と13語を共有
         // していた）。要約バルブは記事単位の混在判定でのみ使う。
-        const anchored = hasStoryAnchor(v.title, c.title, baseVersionTitles, baseArticleTitles, { strict: true });
+        const anchored = hasStoryAnchor(v.title, c.title, baseVersionTitles, baseArticleTitles, { strict: true, p0Base, p0ArticleTitles: baseP0ArticleTitles });
         if (anchored) {
           baseVersionTitles.push(v.title);
-          for (const a of arts) baseArticleTitles.push(a.title);
+          for (const a of arts) { baseArticleTitles.push(a.title); baseP0ArticleTitles.push(a.title); }
           addSummaryWords(arts);
           continue;
         }
@@ -304,7 +310,8 @@ export function splitForeignVersions(db) {
         const anchoredArts = arts.filter((a) => articleAnchored(a, titleOnly));
         if (anchoredArts.length * 2 >= arts.length) {
           // 混在型: 残し、正当な記事だけをベースに加える（版タイトルは加えない）
-          for (const a of anchoredArts) baseArticleTitles.push(a.title);
+          // 個別にアンカーを通過した記事は P0 の足場にも加える
+          for (const a of anchoredArts) { baseArticleTitles.push(a.title); baseP0ArticleTitles.push(a.title); }
           addSummaryWords(anchoredArts);
           continue;
         }
