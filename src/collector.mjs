@@ -172,7 +172,7 @@ clusterCache.set(clusterId, { title, titleBg, articleBgs: [], summaryWords: new 
 // 同一記事が「ラッパーURL」と「直接URL」の両方で届いた場合は直接URL側を残す
 // （「元記事を読む」のリンクが媒体のページへ直接届くようにするため）。
 // 同一媒体・同一版・見出しがほぼ同一のものを同一記事とみなす。
-const sameVersionArticles = db.prepare('SELECT id, url, title FROM articles WHERE version_id = ? AND source = ?').all(versionId, source);
+const sameVersionArticles = db.prepare('SELECT id, url, title, summary FROM articles WHERE version_id = ? AND source = ?').all(versionId, source);
 let duplicateHandled = false;
 for (const ex of sameVersionArticles) {
 if (matchScore(titleBg, filterWeakBigrams(bigrams(ex.title))) < 0.8) continue;
@@ -185,6 +185,19 @@ duplicateHandled = true;
 } else if (!exWrapper && newWrapper) {
 // 既存が直接URLで新規がラッパー: 直接URL側を残し、新規は取り込まない
 duplicateHandled = true;
+}
+if (duplicateHandled) {
+// 要約の補完（Issue #22/#23）: 直接URL側のフィード（朝日・時事の公式RSS等）は
+// 要約を持たないことがあり、同じ記事のGoogleニュース側には description が
+// ある。重複として捨てる側が要約を持ち、残す側が空なら、捨てる側の要約を
+// 残す側へ移す。要約はその記事自身のフィード由来の抜粋であり、他記事の
+// 要約の流用ではない。検索用テキストも合わせて作り直す。
+const incomingSummary = String(raw.summary || '').trim();
+if (!String(ex.summary || '').trim() && incomingSummary) {
+db.prepare('UPDATE articles SET summary = ?, search_text = ? WHERE id = ?')
+.run(raw.summary, buildArticleSearchText(ex.title, raw.summary), ex.id);
+ex.summary = raw.summary;
+}
 }
 break;
 }
