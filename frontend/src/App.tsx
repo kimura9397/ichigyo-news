@@ -19,15 +19,19 @@ import {
   fetchKeywords,
   fetchServerStatus,
   fetchTabRows,
+  fetchWeatherStatus,
   postReadEvent,
   refreshFeed,
   removeBookmark,
   removeKeywordRemote,
   runMaintenance,
   setPollingRemote,
+  setWeatherLocationRemote,
   versionsOfEvent,
   type PollingState,
   type UpdateInfo,
+  type WeatherLocation,
+  type WeatherStatus,
 } from './api'
 import type { CoverageKind, FeedTab, StoryRow } from './types'
 import Spotlight from './Spotlight'
@@ -156,6 +160,45 @@ function App() {
   const [dbBytes, setDbBytes] = useState<number | null>(null)
   // 更新通知（Issue #26）: 新しい版がある時だけサーバーから渡される。なければ null で何も出さない
   const [updateInfo, setUpdateInfo] = useState<UpdateInfo | null>(null)
+  // 天気（Issue #28）: 取得と定期更新はサーバー側。ここでは現在状態の表示と
+  // 場所の変更だけを行う。取得できるまではサーバー側の既定（千代田区）で出す
+  const [weatherStatus, setWeatherStatus] = useState<WeatherStatus | null>(null)
+  const weatherLocation: WeatherLocation = weatherStatus?.location ?? {
+    code: '13101',
+    name: '東京都千代田区',
+    lat: 35.6923,
+    lng: 139.7607,
+  }
+
+  useEffect(() => {
+    fetchWeatherStatus()
+      .then((s) => {
+        if (s) setWeatherStatus(s)
+      })
+      .catch(() => {})
+  }, [])
+
+  /** 天気の場所をサーバーへ保存し、保存後の状態（取り直し結果を含む）へ寄せる。 */
+  const selectWeatherCity = useCallback((city: WeatherLocation) => {
+    setWeatherStatus((prev) =>
+      prev
+        ? { ...prev, location: city, weather: null, fetchedAt: null }
+        : { location: city, weather: null, fetchedAt: null },
+    )
+    setWeatherLocationRemote(city)
+      .then((s) => {
+        if (s) setWeatherStatus(s)
+        // 変更直後はサーバー側の取得が終わっていないことがあるため、少し置いて取り直す
+        setTimeout(() => {
+          fetchWeatherStatus()
+            .then((s2) => {
+              if (s2) setWeatherStatus(s2)
+            })
+            .catch(() => {})
+        }, 1500)
+      })
+      .catch(() => {})
+  }, [])
   const [maintaining, setMaintaining] = useState(false)
   // データ整理（保守）の確認ダイアログと、実行結果のトースト
   const [confirmingMaintenance, setConfirmingMaintenance] = useState(false)
@@ -580,6 +623,16 @@ function App() {
       /* 保存できなくても動作は続ける */
     }
   }, [spotlightSeconds])
+
+  // スポットライトを開いたら天気を取り直す（サーバー側は30分ごとに更新済み）
+  useEffect(() => {
+    if (!spotlightActive) return
+    fetchWeatherStatus()
+      .then((s) => {
+        if (s) setWeatherStatus(s)
+      })
+      .catch(() => {})
+  }, [spotlightActive])
 
   /** サーバー側のポーリング状態をこのタブの表示へ反映する（状態の正はサーバー）。 */
   const applyServerPolling = useCallback((p: PollingState) => {
@@ -1294,6 +1347,8 @@ function App() {
               formatBytes={formatBytes}
               maintaining={maintaining}
               setConfirmingMaintenance={setConfirmingMaintenance}
+              weatherLocation={weatherLocation}
+              onSelectWeatherCity={selectWeatherCity}
             />
           </div>
         </div>
@@ -1368,6 +1423,8 @@ function App() {
           sourceWatchKeywords={spotlightWatchKeywords}
           sourceLabel={spotlightSourceLabel}
           rotateMs={spotlightSeconds * 1000}
+          weather={weatherStatus?.weather ?? null}
+          weatherLocationName={weatherLocation.name}
           isFullscreen={isFullscreen}
           onToggleFullscreen={toggleFullscreen}
           onStop={() => setSpotlightActive(false)}

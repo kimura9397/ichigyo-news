@@ -109,6 +109,17 @@ export function safeUrl(url: string | null | undefined): string {
   }
 }
 
+/** 現在時刻を「M/D(曜) HH:mm」形式に整える（スポットライトの時計表示用）。 */
+export function formatNow(date: Date): string {
+  return new Intl.DateTimeFormat('ja-JP', {
+    month: 'numeric',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+    weekday: 'short',
+  }).format(date)
+}
+
 /** ISO日時を「M/D(曜) HH:mm」形式に整える（一覧・詳細・スポットライトで共用）。 */
 export function formatWhen(iso: string): string {
   const date = new Date(iso)
@@ -599,6 +610,109 @@ export async function setPollingRemote(
     body: JSON.stringify({ enabled, minutes }),
   })
   return pollingFromRaw(data.polling)
+}
+
+/* ---------- 天気（サーバー側で30分ごとに取得、Issue #28） ---------- */
+
+/** スポットライトに出す天気。サーバーが取得できた時だけ非 null。 */
+export interface WeatherInfo {
+  /** 現在の気温（℃） */
+  temperature: number
+  /** 天気コード（WMO） */
+  weatherCode: number
+  /** 天気名（晴れ・雨など、サーバー側で変換済み） */
+  label: string
+  /** 今日の最高気温（℃）。無ければ null */
+  max: number | null
+  /** 今日の最低気温（℃）。無ければ null */
+  min: number | null
+  /** 今日の降水確率の最大（%）。無ければ null */
+  precipitationProbability: number | null
+}
+
+/** 天気の場所（同梱市区町村リストから選んだ1件）。 */
+export interface WeatherLocation {
+  code: string
+  name: string
+  lat: number
+  lng: number
+}
+
+export interface WeatherStatus {
+  location: WeatherLocation
+  weather: WeatherInfo | null
+  fetchedAt: string | null
+}
+
+interface RawWeather {
+  temperature?: number
+  weatherCode?: number
+  label?: string
+  max?: number | null
+  min?: number | null
+  precipitationProbability?: number | null
+}
+
+interface RawWeatherStatus {
+  location?: { code?: string; name?: string; lat?: number; lng?: number }
+  weather?: RawWeather | null
+  fetchedAt?: string | null
+}
+
+function numberOrNull(v: number | null | undefined): number | null {
+  return typeof v === 'number' && Number.isFinite(v) ? v : null
+}
+
+/** 天気の生レスポンス→画面モデル変換（純粋関数。テストからも使うため公開する）。
+ *  現在気温か天気名が無ければ null（天気は出さない）。 */
+export function weatherFromRaw(raw: RawWeatherStatus | null | undefined): WeatherStatus | null {
+  if (!raw || !raw.location) return null
+  const loc = raw.location
+  if (
+    typeof loc.name !== 'string' || !loc.name ||
+    typeof loc.lat !== 'number' || typeof loc.lng !== 'number'
+  ) return null
+  const w = raw.weather
+  const weather: WeatherInfo | null =
+    w && typeof w.temperature === 'number' && Number.isFinite(w.temperature) &&
+    typeof w.label === 'string' && w.label
+      ? {
+          temperature: w.temperature,
+          weatherCode: typeof w.weatherCode === 'number' ? w.weatherCode : -1,
+          label: w.label,
+          max: numberOrNull(w.max),
+          min: numberOrNull(w.min),
+          precipitationProbability: numberOrNull(w.precipitationProbability),
+        }
+      : null
+  return {
+    location: {
+      code: typeof loc.code === 'string' ? loc.code : '',
+      name: loc.name,
+      lat: loc.lat,
+      lng: loc.lng,
+    },
+    weather,
+    fetchedAt: typeof raw.fetchedAt === 'string' ? raw.fetchedAt : null,
+  }
+}
+
+/** 天気の現在状態（場所・天気・取得時刻）をサーバーから取得する。 */
+export async function fetchWeatherStatus(): Promise<WeatherStatus | null> {
+  const data = await fetchJson<RawWeatherStatus>('/api/weather')
+  return weatherFromRaw(data)
+}
+
+/** 天気の場所をサーバーへ設定し、設定後の状態を返す。 */
+export async function setWeatherLocationRemote(
+  location: WeatherLocation,
+): Promise<WeatherStatus | null> {
+  const data = await fetchJson<RawWeatherStatus>('/api/weather-location', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(location),
+  })
+  return weatherFromRaw(data)
 }
 
 /* ---------- ブックマーク・閲覧ログ・DB保守 ---------- */

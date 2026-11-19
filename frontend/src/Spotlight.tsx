@@ -17,8 +17,18 @@
 // トップバーに出す（同日追加指示。挙動はマストヘッド側と共通の props 経由）。
 // 停止は表示内の「スポットライトを停止」ボタンだけ（ユーザーの明示指示）:
 // マウス移動・他の場所のクリック・キー操作では止めない。
+// トップバーの右側には現在時刻（日付・曜日つき、外部依存なし）と天気
+// （サーバーが Open-Meteo から取得した分だけ）を小さく出す（Issue #28）。
+// 天気の表示には利用条件として open-meteo.com への CC BY 4.0 出典リンクを付ける。
 import { useEffect, useRef, useState } from 'react'
-import { fetchClusterDetail, fetchTabRows, formatWhen, safeUrl } from './api'
+import {
+  fetchClusterDetail,
+  fetchTabRows,
+  formatNow,
+  formatWhen,
+  safeUrl,
+  type WeatherInfo,
+} from './api'
 import type { FeedTab, StoryRow } from './types'
 
 /** 一覧取得のページサイズ（一覧側の loadPage と同じ100件ずつ、全ページを辿って全件を保持する） */
@@ -41,6 +51,10 @@ interface SpotlightProps {
   sourceLabel: string
   /** 1件あたりの表示時間（ミリ秒）。設定で変更でき、次の見出しから反映される */
   rotateMs: number
+  /** 天気（サーバーが取得できた時だけ非 null。null の間は天気だけ出さない） */
+  weather: WeatherInfo | null
+  /** 天気の場所の表示名（都道府県＋市区町村） */
+  weatherLocationName: string
   /** 全画面かどうか（マストヘッド側のボタンと状態を共有する） */
   isFullscreen: boolean
   /** 全画面の開始・終了（マストヘッド側のボタンと同じ処理） */
@@ -63,6 +77,8 @@ export default function Spotlight({
   sourceWatchKeywords,
   sourceLabel,
   rotateMs,
+  weather,
+  weatherLocationName,
   isFullscreen,
   onToggleFullscreen,
   onStop,
@@ -76,6 +92,13 @@ export default function Spotlight({
   const [progress, setProgress] = useState(0)
   /** 流し直し直後だけ出す控えめな通知（「更新しました」） */
   const [notice, setNotice] = useState<string | null>(null)
+  /** 現在時刻（時計表示用。1秒ごとに進める） */
+  const [now, setNow] = useState(() => new Date())
+
+  useEffect(() => {
+    const timer = setInterval(() => setNow(new Date()), 1000)
+    return () => clearInterval(timer)
+  }, [])
 
   const itemsRef = useRef<StoryRow[]>([])
   /** 組み直しの世代。全件取得には時間がかかるため、古い組み直しの結果が
@@ -273,6 +296,31 @@ export default function Spotlight({
               {notice}
             </span>
           ) : null}
+          <div className="spotlight-now">
+            <time className="spotlight-clock">{formatNow(now)}</time>
+            {weather ? (
+              <span className="spotlight-weather">
+                <span>
+                  {weatherLocationName} {weather.label}{' '}
+                  {weather.temperature.toFixed(1)}℃
+                  {weather.max !== null && weather.min !== null
+                    ? `　最高 ${Math.round(weather.max)}℃ / 最低 ${Math.round(weather.min)}℃`
+                    : ''}
+                  {weather.precipitationProbability !== null
+                    ? `　降水確率 ${Math.round(weather.precipitationProbability)}%`
+                    : ''}
+                </span>
+                <a
+                  className="spotlight-weather-source"
+                  href="https://open-meteo.com/"
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  Open-Meteo (CC BY 4.0)
+                </a>
+              </span>
+            ) : null}
+          </div>
           <button
             type="button"
             className="icon-btn spotlight-fullscreen"
