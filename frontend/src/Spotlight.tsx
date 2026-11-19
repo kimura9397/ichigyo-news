@@ -26,6 +26,13 @@
 // 選ばれた案28（TV ニュースの隅表示の並び＋半透明チップ）に置き換えた
 // （Issue #39）: ブロック全体を1つのチップにまとめ、先頭に LIVE タグを
 // 置き、時刻と気温は太字にした。データ項目と並びは従来どおり。
+// さらに「時刻と温度の高さが合っていない」という指摘と、「時計部分を
+// 右側に持ってきて、天気と時計をそれぞれ囲う」という提案を受け、候補
+// モックから選ばれた最終形（案4＋W3-V4＋D3）に作り替えた（Issue #45）:
+// チップを天気ボックスと時計ボックスの2つに分け、天気の最高／最低／
+// 降水確率は1本の連結ピル（セグメントピル）に記号化し、日付は年つきに
+// して、時刻には秒を小さく添えた（時計の state は従来から1秒間隔で
+// 更新しているため、表示だけの追加で済む）。
 // チップの左には前へ／次へボタンも置く（Issue #41）: 表示時間の経過を
 // 待たずに手動で前後のストーリーへ移動できる。端では反対側に回り、
 // 移動したらそのストーリーの表示タイマーは最初から数え直す。移動先が
@@ -36,6 +43,7 @@ import {
   fetchClusterDetail,
   fetchTabRows,
   formatDateNow,
+  formatSecondsNow,
   formatTimeNow,
   formatWhen,
   safeUrl,
@@ -424,19 +432,13 @@ export default function Spotlight({
     if (items.length > 1) ensureDetail(items[(effIndex + 1) % items.length])
   }, [items, effIndex])
 
-  /** 天気の従情報（最高／最低・降水確率）。ある分だけを並べる */
-  const weatherDetail = weather
-    ? [
-        weather.max !== null && weather.min !== null
-          ? `最高 ${Math.round(weather.max)}℃ / 最低 ${Math.round(weather.min)}℃`
-          : null,
-        weather.precipitationProbability !== null
-          ? `降水確率 ${Math.round(weather.precipitationProbability)}%`
-          : null,
-      ]
-        .filter((part): part is string => part !== null)
-        .join('　')
-    : ''
+  /** セグメントピルに出す天気の従情報があるか（最高／最低／降水確率の
+   *  いずれか1つでもあればピル自体を出す。各区画は値がある分だけ） */
+  const hasWeatherSeg =
+    weather !== null &&
+    (weather.max !== null ||
+      weather.min !== null ||
+      weather.precipitationProbability !== null)
 
   return (
     <div className="spotlight">
@@ -451,15 +453,10 @@ export default function Spotlight({
               {notice}
             </span>
           ) : null}
-          <div className="spotlight-now">
-            <span className="spotlight-live">LIVE</span>
-            <span className="spotlight-clockset">
-              <span className="spotlight-date">{formatDateNow(now)}</span>
-              <time className="spotlight-clock">{formatTimeNow(now)}</time>
-            </span>
-            {weather ? (
-              <span className="spotlight-weather">
-                <WeatherIcon code={weather.weatherCode} />
+          {weather ? (
+            <div className="spotlight-box spotlight-weatherbox spotlight-box-anchor">
+              <WeatherIcon code={weather.weatherCode} />
+              <span className="spotlight-weather-text">
                 <span className="spotlight-weather-main">
                   <span className="spotlight-weather-temp">
                     {weather.temperature.toFixed(1)}℃
@@ -467,10 +464,7 @@ export default function Spotlight({
                   <span className="spotlight-weather-label">{weather.label}</span>
                 </span>
                 <span className="spotlight-weather-sub">
-                  <span>
-                    {weatherLocationName}
-                    {weatherDetail ? `　${weatherDetail}` : ''}
-                  </span>
+                  {weatherLocationName} ·{' '}
                   <a
                     className="spotlight-weather-source"
                     href="https://open-meteo.com/"
@@ -481,7 +475,81 @@ export default function Spotlight({
                   </a>
                 </span>
               </span>
-            ) : null}
+              {hasWeatherSeg ? (
+                <span className="spotlight-weather-seg">
+                  {weather.max !== null ? (
+                    <span className="spotlight-weather-seg-item">
+                      <svg
+                        className="spotlight-seg-high"
+                        width="10"
+                        height="12"
+                        viewBox="0 0 10 12"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="1.8"
+                        strokeLinecap="round"
+                        aria-hidden="true"
+                        focusable="false"
+                      >
+                        <path d="M5 11 V2 M1.8 5.2 L5 1.6 L8.2 5.2" />
+                      </svg>
+                      {Math.round(weather.max)}℃
+                    </span>
+                  ) : null}
+                  {weather.min !== null ? (
+                    <span className="spotlight-weather-seg-item">
+                      <svg
+                        className="spotlight-seg-low"
+                        width="10"
+                        height="12"
+                        viewBox="0 0 10 12"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="1.8"
+                        strokeLinecap="round"
+                        aria-hidden="true"
+                        focusable="false"
+                      >
+                        <path d="M5 1 V10 M1.8 6.8 L5 10.4 L8.2 6.8" />
+                      </svg>
+                      {Math.round(weather.min)}℃
+                    </span>
+                  ) : null}
+                  {weather.precipitationProbability !== null ? (
+                    <span className="spotlight-weather-seg-item">
+                      <svg
+                        className="spotlight-seg-drop"
+                        width="11"
+                        height="13"
+                        viewBox="0 0 12 14"
+                        fill="currentColor"
+                        aria-hidden="true"
+                        focusable="false"
+                      >
+                        <path d="M6 1 C6 1 1.5 6.6 1.5 9 a4.5 4.5 0 0 0 9 0 C10.5 6.6 6 1 6 1Z" />
+                      </svg>
+                      {Math.round(weather.precipitationProbability)}%
+                    </span>
+                  ) : null}
+                </span>
+              ) : null}
+            </div>
+          ) : null}
+          <div
+            className={`spotlight-box spotlight-clockbox${
+              weather ? '' : ' spotlight-box-anchor'
+            }`}
+          >
+            <span className="spotlight-live">LIVE</span>
+            <span className="spotlight-clockset">
+              <span className="spotlight-date">{formatDateNow(now)}</span>
+              <span className="spotlight-clockline">
+                <time className="spotlight-clock">{formatTimeNow(now)}</time>
+                <span className="spotlight-seconds">
+                  {formatSecondsNow(now)}
+                </span>
+              </span>
+            </span>
           </div>
           <button
             type="button"

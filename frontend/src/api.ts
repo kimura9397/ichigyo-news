@@ -117,13 +117,22 @@ export function formatTimeNow(date: Date): string {
   }).format(date)
 }
 
-/** 日付だけを「M/D(曜)」形式に整える（スポットライトの時計表示用）。 */
+/** 日付だけを「YYYY年M月D日(曜)」形式に整える（スポットライトの時計表示用）。
+ *  年つきにしたのは Issue #45（年が無いと何か足りないというユーザー指摘） */
 export function formatDateNow(date: Date): string {
   return new Intl.DateTimeFormat('ja-JP', {
-    month: 'numeric',
+    year: 'numeric',
+    month: 'long',
     day: 'numeric',
     weekday: 'short',
   }).format(date)
+}
+
+/** 秒だけを「:SS」形式に整える（スポットライトの時計表示用、Issue #45）。
+ *  時刻（HH:mm）の右に小さく添えるため、区切りのコロンごと返す。
+ *  Intl の second は環境によってゼロ埋めされないため getSeconds で組み立てる */
+export function formatSecondsNow(date: Date): string {
+  return `:${String(date.getSeconds()).padStart(2, '0')}`
 }
 
 /**

@@ -8,6 +8,9 @@
   --line: #8f8069;
   --vermillion: #b13224;
   --fresh: #1f6f64;
+  /* 天気の寒色（最低気温の矢印・水滴アイコン用、Issue #45）。地に対して
+     判読できる明度をテーマごとに持たせる */
+  --weather-cool: #5b8cc0;
   --shadow: 0 10px 30px color-mix(in srgb, var(--ink) 8%, transparent);
   /* 見出し系の基準サイズ（2026-11-15 是正）。全体フォントサイズ設定が入る際はここを起点にスケールする */
   --fs-row-title: 13px;
@@ -151,6 +154,7 @@ button:focus-visible {
   --line: #8f7d62;
   --vermillion: #f4ac8a;
   --fresh: #6cc9b8;
+  --weather-cool: #a9c6e8;
   --shadow: 0 10px 30px rgb(0 0 0 / 0.45);
   --tint-base: #403930;
   background: #2b2620;
@@ -170,6 +174,7 @@ button:focus-visible {
   --line: #a68f68;
   --vermillion: #ffb87a;
   --fresh: #85d6c4;
+  --weather-cool: #a9c6e8;
   --shadow: 0 10px 30px rgb(0 0 0 / 0.38);
   --tint-base: #4a4034;
   background: #362f27;
@@ -186,6 +191,7 @@ button:focus-visible {
   --line: #7a5f3a;
   --vermillion: #99350a;
   --fresh: #1e6b57;
+  --weather-cool: #4a7ca8;
   --tint-base: #fffaf0;
   background: #e3cfa2;
   color-scheme: light;
@@ -199,6 +205,7 @@ button:focus-visible {
   --line: #767676;
   --vermillion: #000000;
   --fresh: #404040;
+  --weather-cool: #404040;
   --tint-base: #ffffff;
   background: #ececec;
   color-scheme: light;
