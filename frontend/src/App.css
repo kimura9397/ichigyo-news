@@ -1436,6 +1436,42 @@
   animation: spotlight-notice-in 0.25s ease;
 }
 
+/* 現在時刻と天気（Issue #28）。トップバーの右寄せの起点として小さく出す。
+   全画面ボタンはこの右に続く（既定の margin-inline-start: auto は打ち消す） */
+.spotlight-now {
+  margin-inline-start: auto;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 14px;
+}
+
+.spotlight-now + .spotlight-fullscreen {
+  margin-inline-start: 0;
+}
+
+.spotlight-clock {
+  font-size: calc(13px * var(--font-scale));
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.spotlight-weather {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 10px;
+  font-size: calc(12.5px * var(--font-scale));
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.spotlight-weather-source {
+  color: var(--muted);
+  font-size: calc(11px * var(--font-scale));
+}
+
 @keyframes spotlight-notice-in {
   from {
     opacity: 0;
