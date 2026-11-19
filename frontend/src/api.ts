@@ -789,3 +789,76 @@ export async function runMaintenance(): Promise<MaintenanceResult> {
     afterBytes: data.after_bytes,
   }
 }
+
+/* ---------- URLハッシュルーティング（Issue #24） ---------- */
+
+/**
+ * 表示状態と URL ハッシュの対応。形式は `#/<tab>` または
+ * `#/<tab>/<storyId>` に、必要に応じて `?cat=<カテゴリ>&q=<検索語>&kw=<ウォッチキーワード>` を付ける。
+ * storyId は行ID（`c<クラスタID>-v<版ID>`）で、詳細は /api/story/<クラスタID> から
+ * 復元できる。サーバー側はハッシュを見ないため、静的配信のままで共有リンクが成立する。
+ */
+export interface HashRoute {
+  tab: FeedTab
+  storyId: string | null
+  category: string | null
+  query: string | null
+  watchKeyword: string | null
+}
+
+const ROUTE_TABS: readonly FeedTab[] = [
+  'important',
+  'fresh',
+  'editorials',
+  'bookmarks',
+  'watch',
+  'search',
+]
+
+const STORY_ID_PATTERN = /^c\d+-v\d+$/
+
+/** 行ID（`c<クラスタID>-v<版ID>`）からクラスタIDを取り出す。不正な形式は null。 */
+export function clusterIdOfStoryId(storyId: string): number | null {
+  const m = /^c(\d+)-v\d+$/.exec(storyId)
+  return m ? Number(m[1]) : null
+}
+
+/** ハッシュ文字列をルートに解釈する。空・不正な場合は null（呼び出し側が既定表示にする）。 */
+export function parseHashRoute(hash: string): HashRoute | null {
+  const raw = String(hash ?? '').replace(/^#/, '')
+  if (!raw.startsWith('/')) return null
+  const [pathPart, queryPart = ''] = raw.slice(1).split('?', 2)
+  const segments = pathPart.split('/').filter((s) => s !== '')
+  if (segments.length < 1 || segments.length > 2) return null
+  const tab = segments[0] as FeedTab
+  if (!ROUTE_TABS.includes(tab)) return null
+  const storyId =
+    segments[1] !== undefined && STORY_ID_PATTERN.test(segments[1])
+      ? segments[1]
+      : null
+  const params = new URLSearchParams(queryPart)
+  const get = (k: string) => {
+    const v = params.get(k)
+    return v !== null && v !== '' ? v : null
+  }
+  return {
+    tab,
+    storyId,
+    category: get('cat'),
+    query: get('q'),
+    watchKeyword: get('kw'),
+  }
+}
+
+/** ルートからハッシュ文字列を組み立てる。parseHashRoute と往復できる形にする。 */
+export function buildHashRoute(route: HashRoute): string {
+  const path = route.storyId
+    ? `/${route.tab}/${route.storyId}`
+    : `/${route.tab}`
+  const params = new URLSearchParams()
+  if (route.category) params.set('cat', route.category)
+  if (route.query) params.set('q', route.query)
+  if (route.watchKeyword) params.set('kw', route.watchKeyword)
+  const qs = params.toString()
+  return `#${path}${qs ? `?${qs}` : ''}`
+}
