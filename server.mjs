@@ -18,6 +18,7 @@ import { listKeywords, addKeyword as addKeywordToDb, removeKeyword as removeKeyw
 import { runningAsSea, readSeaAsset, defaultDataDir, openBrowser } from './src/sea.mjs';
 import { APP_VERSION } from './src/version.mjs';
 import { checkLatestRelease, LATEST_RELEASE_URL } from './src/update-check.mjs';
+import { fetchWeather, validateWeatherLocation, DEFAULT_WEATHER_LOCATION } from './src/weather.mjs';
 
 // SEA 実行時は import.meta.url が得られないため、その場合は cwd を基点にする
 // （SEA では静的配信も DB パスも ROOT を使わないので、基点はダミーでよい）。
@@ -154,6 +155,77 @@ const UPDATE_CHECK_URL = process.env.ICHIGYO_UPDATE_CHECK_URL || LATEST_RELEASE_
 let updateInfo = null;
 void checkLatestRelease({ currentVersion: APP_VERSION, url: UPDATE_CHECK_URL })
   .then((info) => { updateInfo = info; });
+
+/* ---------- 天気（サーバー側の定期取得、Issue #28） ---------- */
+// 天気の取得はサーバー側で持つ。ニュースのポーリングとは独立のタイマーで
+// 30分ごとに Open-Meteo から取得し、結果をメモリに保持して /api/weather で
+// 返す。取得に失敗した回は保持データを更新しない（初回から失敗している
+// 場合は weather が null のままで、画面では天気だけ出さない。成功した回の
+// fetchedAt が取得時刻として残る）。場所は DB（app_settings）に保存し、
+// 再起動時に復元する。
+// 外部へ送るのは選んだ市区町村の緯度経度だけで、地名は送らない。
+// 取得先はテスト用に環境変数で差し替えられる（通常は Open-Meteo のまま）。
+const WEATHER_SETTING_KEY = 'weather_location';
+const WEATHER_INTERVAL_MS = 30 * 60 * 1000;
+const WEATHER_API_URL = process.env.ICHIGYO_WEATHER_URL || '';
+const weatherState = { location: { ...DEFAULT_WEATHER_LOCATION }, data: null, fetchedAt: null };
+let weatherTimer = null;
+
+function weatherStatus() {
+  return { location: weatherState.location, weather: weatherState.data, fetchedAt: weatherState.fetchedAt };
+}
+
+/** 次回の天気取得を予約する（ポーリングのタイマーとは独立）。 */
+function scheduleWeather() {
+  if (weatherTimer) {
+    clearTimeout(weatherTimer);
+    weatherTimer = null;
+  }
+  weatherTimer = setTimeout(() => {
+    void refreshWeather();
+  }, WEATHER_INTERVAL_MS);
+  weatherTimer.unref?.();
+}
+
+/** 天気を1回取得し、取れた場合だけ保持データを更新して次回を予約する。 */
+async function refreshWeather() {
+  const loc = weatherState.location;
+  const data = await fetchWeather({
+    lat: loc.lat,
+    lng: loc.lng,
+    url: WEATHER_API_URL || undefined,
+  });
+  // 取得中に場所が変わっていたら、古い場所の結果は捨てる
+  if (data && weatherState.location.lat === loc.lat && weatherState.location.lng === loc.lng) {
+    weatherState.data = data;
+    weatherState.fetchedAt = new Date().toISOString();
+  }
+  scheduleWeather();
+}
+
+/** 天気の場所を変更し、保存して即座に取り直す。変更後の状態を返す。 */
+function setWeatherLocation(location) {
+  weatherState.location = location;
+  weatherState.data = null;
+  weatherState.fetchedAt = null;
+  db.prepare('INSERT INTO app_settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value')
+    .run(WEATHER_SETTING_KEY, JSON.stringify(location));
+  void refreshWeather();
+  return weatherStatus();
+}
+
+/** 起動時に天気の場所を DB から復元し、初回取得を開始する。 */
+function restoreWeather() {
+  try {
+    const row = db.prepare('SELECT value FROM app_settings WHERE key = ?').get(WEATHER_SETTING_KEY);
+    if (row) {
+      const saved = validateWeatherLocation(JSON.parse(row.value));
+      if (saved) weatherState.location = saved;
+    }
+  } catch { /* 保存値が読めなくても既定（草加市）で起動する */ }
+  void refreshWeather();
+}
+restoreWeather();
 
 // 背景社説チェック: refresh 完了後、重要タブ上位クラスタの社説を裏で確認する（refresh はブロックしない）
 let editorialBatchRunning = false;
@@ -497,6 +569,15 @@ const server = createServer(async (req, res) => {
       const polling = setPolling(enabled, minutes);
       if (!polling) return sendJson(res, 400, { error: 'invalid minutes', polling: pollingStatus() });
       return sendJson(res, 200, { polling });
+    }
+    if (p === '/api/weather' && req.method === 'GET') {
+      return sendJson(res, 200, weatherStatus());
+    }
+    if (p === '/api/weather-location' && req.method === 'POST') {
+      const body = await readJsonBody(req);
+      const location = validateWeatherLocation(body);
+      if (!location) return sendJson(res, 400, { error: 'invalid location', ...weatherStatus() });
+      return sendJson(res, 200, setWeatherLocation(location));
     }
     if (p === '/api/status' && req.method === 'GET') {
       const counts = db.prepare('SELECT (SELECT COUNT(*) FROM clusters) AS clusters, (SELECT COUNT(*) FROM versions) AS versions, (SELECT COUNT(*) FROM articles) AS articles').get();
