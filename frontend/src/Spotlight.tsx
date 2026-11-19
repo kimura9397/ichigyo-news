@@ -451,52 +451,6 @@ export default function Spotlight({
               {notice}
             </span>
           ) : null}
-          <div className="spotlight-nav">
-            <button
-              type="button"
-              className="icon-btn"
-              onClick={() => moveSlot(-1)}
-              disabled={items.length <= 1}
-              title="前のニュース"
-              aria-label="前のニュース"
-            >
-              <svg
-                width="17"
-                height="17"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                aria-hidden="true"
-              >
-                <path d="M15 18l-6-6 6-6" />
-              </svg>
-            </button>
-            <button
-              type="button"
-              className="icon-btn"
-              onClick={() => moveSlot(1)}
-              disabled={items.length <= 1}
-              title="次のニュース"
-              aria-label="次のニュース"
-            >
-              <svg
-                width="17"
-                height="17"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                aria-hidden="true"
-              >
-                <path d="M9 18l6-6-6-6" />
-              </svg>
-            </button>
-          </div>
           <div className="spotlight-now">
             <span className="spotlight-live">LIVE</span>
             <span className="spotlight-clockset">
@@ -674,6 +628,56 @@ export default function Spotlight({
           )}
         </article>
       )}
+
+      {/* 前へ／次へボタン（Issue #41 で追加、Issue #43 でステージ下部中央の
+          フローティングピルに移設）。トップバーではなくステージ側に置き、
+          普段は薄く沈めてアンビエント表示の邪魔をしない */}
+      <div className="spotlight-floatnav">
+        <button
+          type="button"
+          className="spotlight-floatnav-btn"
+          onClick={() => moveSlot(-1)}
+          disabled={items.length <= 1}
+          title="前のニュース"
+          aria-label="前のニュース"
+        >
+          <svg
+            width="19"
+            height="19"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2.2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            aria-hidden="true"
+          >
+            <path d="M15 18l-6-6 6-6" />
+          </svg>
+        </button>
+        <button
+          type="button"
+          className="spotlight-floatnav-btn"
+          onClick={() => moveSlot(1)}
+          disabled={items.length <= 1}
+          title="次のニュース"
+          aria-label="次のニュース"
+        >
+          <svg
+            width="19"
+            height="19"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2.2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            aria-hidden="true"
+          >
+            <path d="M9 18l6-6-6-6" />
+          </svg>
+        </button>
+      </div>
     </div>
   )
 }
