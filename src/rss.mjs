@@ -24,12 +24,16 @@ category,
 url: `https://news.google.com/rss/search?q=${encodeURIComponent(q)}&hl=ja&gl=JP&ceid=JP:ja`,
 })),
 // Yahoo!ニュース（トピックス別）
+// このフィードのアイテムには <source> も description も無く、見出しにも媒体名が
+// 付かない（2026-11-19 実フィードで確認）。配信元はフィード自体（Yahoo!ニュース・
+// トピックス）なので、媒体名はフィード定義で明示する。個別記事の発信元は
+// フィードからは分からないため、捏造して付けない（Issue #21）。
 ...[
 ['top-picks', ''], ['domestic', '社会'], ['world', '国際'], ['business', '経済'],
 ['entertainment', '文化・エンタメ'], ['sports', 'スポーツ'], ['it', '科学'], ['science', '科学'],
 ].map(([t, category]) => ({
 name: `Yahoo ${t}`,
-source: '',
+source: 'Yahoo!ニュース',
 category,
 url: `https://news.yahoo.co.jp/rss/topics/${t}.xml`,
 })),
@@ -163,7 +167,12 @@ return items;
 /** Googleニュース形式の「見出し - 媒体名」から媒体名を取り出す。 */
 export function extractSourceFromTitle(title) {
 const m = String(title).match(/[-―–—]\s*([^-―–—]{2,20})$/);
-return m? m[1].trim(): '';
+if (!m) return '';
+const suffix = m[1].trim();
+// スコア表記（例: 「森保J 3-2でブラジル相手に勝利」の「2で…」）を媒体名と
+// 誤認しない。数字で始まるサフィックスは媒体名ではない（Issue #21 実例）。
+if (/^[0-9０-９]/.test(suffix)) return '';
+return suffix;
 }
 
 export function normalizeSource(name) {
