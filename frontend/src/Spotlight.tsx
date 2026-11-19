@@ -26,6 +26,10 @@
 // 選ばれた案28（TV ニュースの隅表示の並び＋半透明チップ）に置き換えた
 // （Issue #39）: ブロック全体を1つのチップにまとめ、先頭に LIVE タグを
 // 置き、時刻と気温は太字にした。データ項目と並びは従来どおり。
+// チップの左には前へ／次へボタンも置く（Issue #41）: 表示時間の経過を
+// 待たずに手動で前後のストーリーへ移動できる。端では反対側に回り、
+// 移動したらそのストーリーの表示タイマーは最初から数え直す。移動先が
+// ない（1件以下）ときは無効化する。
 // 天気の表示には利用条件として open-meteo.com への CC BY 4.0 出典リンクを付ける。
 import { useEffect, useRef, useState } from 'react'
 import {
@@ -35,6 +39,7 @@ import {
   formatTimeNow,
   formatWhen,
   safeUrl,
+  steppedIndex,
   type WeatherInfo,
 } from './api'
 import type { FeedTab, StoryRow } from './types'
@@ -336,6 +341,21 @@ export default function Spotlight({
   const rebuildRef = useRef(rebuild)
   rebuildRef.current = rebuild
 
+  /** 前へ／次へボタンによる手動移動（Issue #41）。端では反対側に回り、
+   *  移動先のストーリーの表示タイマーは最初から数え直す（残り時間は
+   *  引き継がない）。移動先がない（1件以下）ときは何もしない */
+  const moveSlot = (delta: number) => {
+    const len = itemsRef.current.length
+    if (len <= 1) return
+    const currentIndex = steppedIndex(slotRef.current, 0, len)
+    const next = steppedIndex(currentIndex, delta, len)
+    slotRef.current = next
+    setSlot(next)
+    slotStartRef.current = Date.now()
+    slotMsRef.current = rotateMsRef.current
+    setProgress(0)
+  }
+
   // 初回組み立て
   useEffect(() => {
     void rebuildRef.current(false)
@@ -431,6 +451,52 @@ export default function Spotlight({
               {notice}
             </span>
           ) : null}
+          <div className="spotlight-nav">
+            <button
+              type="button"
+              className="icon-btn"
+              onClick={() => moveSlot(-1)}
+              disabled={items.length <= 1}
+              title="前のニュース"
+              aria-label="前のニュース"
+            >
+              <svg
+                width="17"
+                height="17"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                aria-hidden="true"
+              >
+                <path d="M15 18l-6-6 6-6" />
+              </svg>
+            </button>
+            <button
+              type="button"
+              className="icon-btn"
+              onClick={() => moveSlot(1)}
+              disabled={items.length <= 1}
+              title="次のニュース"
+              aria-label="次のニュース"
+            >
+              <svg
+                width="17"
+                height="17"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                aria-hidden="true"
+              >
+                <path d="M9 18l6-6-6-6" />
+              </svg>
+            </button>
+          </div>
           <div className="spotlight-now">
             <span className="spotlight-live">LIVE</span>
             <span className="spotlight-clockset">

@@ -126,6 +126,20 @@ export function formatDateNow(date: Date): string {
   }).format(date)
 }
 
+/**
+ * スポットライトの手動移動用：現在位置から delta だけ進めた位置を返す。
+ * 端では反対側に回る（ローテーションのループと一貫させる）。件数が0以下
+ * のときは 0 を返す。現在位置が範囲外でも結果は必ず [0, length) に収める。
+ */
+export function steppedIndex(
+  current: number,
+  delta: number,
+  length: number,
+): number {
+  if (length <= 0) return 0
+  return (((current + delta) % length) + length) % length
+}
+
 /** ISO日時を「M/D(曜) HH:mm」形式に整える（一覧・詳細・スポットライトで共用）。 */
 export function formatWhen(iso: string): string {
   const date = new Date(iso)
