@@ -6,8 +6,8 @@
 // - サーバー統合テスト: 取得先を環境変数 ICHIGYO_WEATHER_URL でローカルの
 //   スタブに差し替え、/api/weather の返却・場所変更・不正値の拒否・再起動時の
 //   復元を見る（実 Open-Meteo にはアクセスしない）
-// - フロント: weatherFromRaw / formatNow の変換と、スポットライトの出典
-//   リンク・設定メニューの場所検索の静的検査
+// - フロント: weatherFromRaw / formatTimeNow / formatDateNow の変換と、
+//   スポットライトの出典リンク・設定メニューの場所検索の静的検査
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
@@ -25,7 +25,7 @@ import {
   validateWeatherLocation,
   DEFAULT_WEATHER_LOCATION,
 } from '../src/weather.mjs';
-import { weatherFromRaw, formatNow } from '../frontend/src/api.ts';
+import { weatherFromRaw, formatTimeNow, formatDateNow } from '../frontend/src/api.ts';
 import { CITIES } from '../frontend/src/cities.ts';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -370,19 +370,22 @@ test('weatherFromRaw: 正常な状態を変換し、天気なし・不正な値�
   assert.equal(weatherFromRaw({ weather: null }), null, '場所が無ければ null');
 });
 
-test('formatNow: 日付・曜日・時刻を含む', () => {
-  const text = formatNow(new Date(2026, 10, 19, 10, 55));
-  assert.ok(text.includes('11'), text);
-  assert.ok(text.includes('19'), text);
-  assert.ok(text.includes('木'), text);
-  assert.ok(text.includes('10:55'), text);
+test('formatTimeNow / formatDateNow: 時刻と日付・曜日を含む', () => {
+  const date = new Date(2026, 10, 19, 10, 55);
+  assert.equal(formatTimeNow(date), '10:55');
+  const dateText = formatDateNow(date);
+  assert.ok(dateText.includes('11'), dateText);
+  assert.ok(dateText.includes('19'), dateText);
+  assert.ok(dateText.includes('木'), dateText);
 });
 
 test('フロント: スポットライトに時計と天気と CC BY 4.0 の出典リンクがある', () => {
   const spot = read('frontend/src/Spotlight.tsx');
   assert.ok(spot.includes('spotlight-clock'), '時計の表示がありません');
-  assert.ok(spot.includes('formatNow(now)'), '現在時刻を描画していません');
+  assert.ok(spot.includes('formatTimeNow(now)'), '現在時刻を描画していません');
+  assert.ok(spot.includes('formatDateNow(now)'), '日付を描画していません');
   assert.ok(spot.includes('spotlight-weather'), '天気の表示がありません');
+  assert.ok(spot.includes('WeatherIcon'), '天気アイコンがありません');
   assert.ok(spot.includes('https://open-meteo.com/'), '出典リンクがありません');
   assert.ok(spot.includes('CC BY 4.0'), 'CC BY 4.0 の表記がありません');
   assert.ok(spot.includes('weather ?'), '天気が無い時に出さない条件分岐がありません');

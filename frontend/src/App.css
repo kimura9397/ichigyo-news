@@ -1436,40 +1436,92 @@
   animation: spotlight-notice-in 0.25s ease;
 }
 
-/* 現在時刻と天気（Issue #28）。トップバーの右寄せの起点として小さく出す。
-   全画面ボタンはこの右に続く（既定の margin-inline-start: auto は打ち消す） */
+/* 現在時刻と天気（Issue #28、見た目を Issue #35 で整えた）。トップバーの
+   右寄せの起点として出す。全画面ボタンはこの右に続く（既定の
+   margin-inline-start: auto は打ち消す）。時刻・天気・出典でサイズと
+   揃えが混在して段差に見えたため、行全体の垂直位置を center に統一し、
+   主（時刻・気温は大きく細く）／従（日付・詳細・出典は小さく muted）の
+   二層に分けた */
 .spotlight-now {
   margin-inline-start: auto;
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 4px 14px;
+  gap: 6px 20px;
 }
 
 .spotlight-now + .spotlight-fullscreen {
   margin-inline-start: 0;
 }
 
-.spotlight-clock {
-  font-size: calc(13px * var(--font-scale));
+/* 日付（小）＋時刻（大）の組。縦に積み、行内では center で揃える */
+.spotlight-clockset {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  line-height: 1;
+}
+
+.spotlight-date {
+  font-size: calc(11px * var(--font-scale));
+  letter-spacing: 0.08em;
   color: var(--muted);
+  white-space: nowrap;
+}
+
+.spotlight-clock {
+  font-size: calc(30px * var(--font-scale));
+  font-weight: 300;
+  letter-spacing: 0.04em;
+  color: var(--ink);
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
 
+/* 天気はアイコン＋気温（主）と、場所・詳細・出典（従）の二層 */
 .spotlight-weather {
   display: inline-flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: 4px 10px;
-  font-size: calc(12.5px * var(--font-scale));
+  align-items: center;
+  gap: 10px;
   color: var(--muted);
   white-space: nowrap;
 }
 
+.spotlight-weather svg {
+  flex: none;
+}
+
+.spotlight-weather-main {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  line-height: 1;
+}
+
+.spotlight-weather-temp {
+  font-size: calc(24px * var(--font-scale));
+  font-weight: 300;
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+}
+
+.spotlight-weather-label {
+  font-size: calc(12.5px * var(--font-scale));
+  color: var(--muted);
+}
+
+.spotlight-weather-sub {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  line-height: 1.4;
+  font-size: calc(11px * var(--font-scale));
+  color: var(--muted);
+}
+
 .spotlight-weather-source {
   color: var(--muted);
-  font-size: calc(11px * var(--font-scale));
+  font-size: calc(10.5px * var(--font-scale));
 }
 
 @keyframes spotlight-notice-in {
