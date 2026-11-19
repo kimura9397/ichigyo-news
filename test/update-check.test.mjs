@@ -404,6 +404,14 @@ test('フロント: UpdateNotice はホバーでパネルを出し、遷移は�
   assert.ok(notice.includes('href={update.url}'), 'リリースページへのリンクがありません');
   assert.ok(!notice.includes('location.'), '強制遷移（location 操作）が含まれています');
   assert.ok(!notice.includes('useEffect'), '副作用での自動表示・遷移が含まれています');
+  // 表示はバッジでなく「vX.Y.Z があります」のテキスト（Issue #51）
+  assert.ok(notice.includes('v{update.version}'), '版番号のテキスト表示がありません');
+  assert.ok(notice.includes('update-link-version'), '版番号の強調スパンがありません');
+  assert.ok(!notice.includes('update-badge'), '旧バッジのクラスが残っています');
+  const css = read('frontend/src/App.css');
+  assert.ok(css.includes('.update-link-version'), '版番号のスタイルがありません');
+  assert.ok(css.includes('color: var(--vermillion)'), '版番号が朱（テーマ連動）になっていません');
+  assert.ok(!css.includes('#f5b921'), '旧バッジの黄色が残っています');
   const app = read('frontend/src/App.tsx');
   assert.ok(app.includes('{updateInfo ? <UpdateNotice update={updateInfo} /> : null}'), '新しい版がある時だけ出す条件分岐がありません');
   assert.ok(app.includes('setUpdateInfo(s.update)'), '/api/status の update を画面に反映していません');

@@ -6,7 +6,9 @@ interface UpdateNoticeProps {
 }
 
 /**
- * 更新通知（Issue #26）: 新しい版がある時だけマストヘッドに出る黄色い「!」。
+ * 更新通知（Issue #26、表示形式は Issue #51 で変更）: 新しい版がある時だけ
+ * マストヘッドに「vX.Y.Z があります」とテキストで出す。版番号は朱
+ * （--vermillion、テーマ連動）の太字、それ以外は muted。
  * マウスオーバー（またはフォーカス）でパネルが開き、リリースノートをその中で
  * 読める。クリックでリリースページを開く（開くのは利用者がクリックした時
  * だけ。自動でページへ飛ばすことはしない）。
@@ -22,7 +24,7 @@ export default function UpdateNotice({ update }: UpdateNoticeProps) {
       onMouseLeave={() => setOpen(false)}
     >
       <a
-        className="update-badge"
+        className="update-link"
         href={update.url}
         target="_blank"
         rel="noopener noreferrer"
@@ -31,7 +33,7 @@ export default function UpdateNotice({ update }: UpdateNoticeProps) {
         onFocus={() => setOpen(true)}
         onBlur={() => setOpen(false)}
       >
-        !
+        <span className="update-link-version">v{update.version}</span> があります
       </a>
       {open ? (
         <div className="update-panel">
@@ -46,7 +48,7 @@ export default function UpdateNotice({ update }: UpdateNoticeProps) {
           {update.notes ? (
             <div className="update-panel-notes">{update.notes}</div>
           ) : null}
-          <p className="update-panel-foot">「!」をクリックするとリリースページを開きます</p>
+          <p className="update-panel-foot">クリックするとリリースページを開きます</p>
         </div>
       ) : null}
     </div>
