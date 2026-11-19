@@ -13,6 +13,8 @@ import {
   addBookmark,
   addKeywordRemote,
   applyEditorials,
+  buildHashRoute,
+  clusterIdOfStoryId,
   fetchClusterDetail,
   fetchDbStatus,
   fetchEditorials,
@@ -20,6 +22,7 @@ import {
   fetchServerStatus,
   fetchTabRows,
   fetchWeatherStatus,
+  parseHashRoute,
   postReadEvent,
   refreshFeed,
   removeBookmark,
@@ -84,6 +87,16 @@ const CATEGORY_ORDER = [
 ]
 const ALL_CATEGORY = 'すべて'
 
+/**
+ * 起動時の URL ハッシュ（Issue #24）。共有リンクやリロードで表示位置を
+ * 復元するため、初期状態はここから決める。不正なハッシュは null になり、
+ * 通常の初期表示（重要タブ）になる。
+ */
+const INITIAL_ROUTE =
+  typeof window !== 'undefined'
+    ? parseHashRoute(window.location.hash)
+    : null
+
 type DetailState = 'loading' | 'loaded'
 type EditorialState = 'unchecked' | 'loading' | 'done'
 export type FontSizeSetting = 'small' | 'medium' | 'large'
@@ -135,10 +148,12 @@ const listKey = (tab: FeedTab, category: string, scope = '') =>
   scope ? `${tab}:${scope}|${category}` : `${tab}|${category}`
 
 function App() {
-  const [tab, setTab] = useState<FeedTab>('important')
+  const [tab, setTab] = useState<FeedTab>(INITIAL_ROUTE?.tab ?? 'important')
   // ブックマーク件数（タブ行右端のボタンの併記用。不明な間は null）
   const [bookmarkCount, setBookmarkCount] = useState<number | null>(null)
-  const [category, setCategory] = useState<string>(ALL_CATEGORY)
+  const [category, setCategory] = useState<string>(
+    INITIAL_ROUTE?.category ?? ALL_CATEGORY,
+  )
   // タブ×カテゴリごとに取得したページ（APIの返却順をそのまま使う）
   const [pages, setPages] = useState<Record<string, ListPage | null>>({})
   // タブごとのカテゴリ別件数（チップ表示用）
@@ -147,7 +162,9 @@ function App() {
   >({})
   // 取得済みの全行（詳細で埋まった行もここに蓄積し、版の行き来に使う）
   const [rows, setRows] = useState<Record<string, StoryRow>>({})
-  const [selectedId, setSelectedId] = useState<string | null>(null)
+  const [selectedId, setSelectedId] = useState<string | null>(
+    INITIAL_ROUTE?.storyId ?? null,
+  )
   const [outletId, setOutletId] = useState<string | null>(null)
   const [coverageKind, setCoverageKind] = useState<CoverageKind>('summary')
   const [loadError, setLoadError] = useState<string | null>(null)
@@ -401,7 +418,9 @@ function App() {
   // アップロードして引き継ぎ、ローカル側は消す。
   const [keywords, setKeywords] = useState<string[]>([])
   /** ウォッチビューで選択中のキーワード（null は「すべて」= 全キーワードの OR） */
-  const [watchKeyword, setWatchKeyword] = useState<string | null>(null)
+  const [watchKeyword, setWatchKeyword] = useState<string | null>(
+    INITIAL_ROUTE?.watchKeyword ?? null,
+  )
   const [keywordInput, setKeywordInput] = useState('')
   const keywordsRef = useRef<string[]>(keywords)
   const watchKeywordRef = useRef<string | null>(watchKeyword)
@@ -508,9 +527,9 @@ function App() {
   }
 
   // キーワード検索（2026-11-15 ユーザー決定）。一致判定はウォッチと同じ tab=watch を使う
-  const [searchInput, setSearchInput] = useState('')
+  const [searchInput, setSearchInput] = useState(INITIAL_ROUTE?.query ?? '')
   /** 検索を実行した語（'' は未検索） */
-  const [searchQuery, setSearchQuery] = useState('')
+  const [searchQuery, setSearchQuery] = useState(INITIAL_ROUTE?.query ?? '')
   const searchQueryRef = useRef('')
 
   useEffect(() => {
@@ -537,6 +556,60 @@ function App() {
       setToast(`「${searchQuery}」はすでに登録されています`)
     }
   }
+
+  // --- URLハッシュとの同期（Issue #24） ---
+  // 状態→URL: 同期 effect は replaceState のみで URL を現在の状態に合わせ続ける
+  // （自動選択のような内部都合の変化で履歴を汚さない）。履歴を積むのは利用者の
+  // 明示操作（タブ切替・ストーリーを開く）だけとし、pushRoute で行う。
+  // URL→状態: hashchange（戻る/進む・手編集）で状態へ反映する。反映後の状態から
+  // 組み立てるハッシュは現在の URL と一致するため、書き戻しは起きない。
+  useEffect(() => {
+    const hash = buildHashRoute({
+      tab,
+      storyId: selectedId,
+      category: category !== ALL_CATEGORY ? category : null,
+      query: tab === 'search' ? searchQuery || null : null,
+      watchKeyword: tab === 'watch' ? watchKeyword : null,
+    })
+    if (window.location.hash !== hash) {
+      window.history.replaceState(null, '', hash)
+    }
+  }, [tab, category, selectedId, searchQuery, watchKeyword])
+
+  /** 明示操作のときに履歴を1つ積む（openStory / switchTab から使う）。 */
+  function pushRoute(next: { tab: FeedTab; storyId: string | null }) {
+    const hash = buildHashRoute({
+      tab: next.tab,
+      storyId: next.storyId,
+      category: category !== ALL_CATEGORY ? category : null,
+      query: next.tab === 'search' ? searchQuery || null : null,
+      watchKeyword: next.tab === 'watch' ? watchKeyword : null,
+    })
+    if (window.location.hash !== hash) {
+      window.history.pushState(null, '', hash)
+    }
+  }
+
+  useEffect(() => {
+    const onHashChange = () => {
+      const route = parseHashRoute(window.location.hash)
+      if (!route) return
+      setTab(route.tab)
+      setCategory(route.category ?? ALL_CATEGORY)
+      setSelectedId(route.storyId)
+      setSearchQuery(route.query ?? '')
+      setSearchInput(route.query ?? '')
+      setWatchKeyword(route.watchKeyword)
+      // 狭幅ではペイン位置も合わせる（詳細があれば詳細側、無ければ一覧側）
+      if (window.matchMedia(NARROW_MEDIA).matches) {
+        if (route.storyId) goToDetailPane()
+        else goToListPane()
+      }
+    }
+    window.addEventListener('hashchange', onHashChange)
+    return () => window.removeEventListener('hashchange', onHashChange)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   /** 重要タブのカテゴリミュート切替。条件が変わるので重要タブのキャッシュは捨てる。 */
   function toggleMuteCategory(cat: string) {
@@ -1045,6 +1118,37 @@ function App() {
       })
   }, [selectedClusterId, selectedEditorialState])
 
+  // URLから復元した選択（共有リンク・リロード、Issue #24）が一覧に無い場合は、
+  // クラスタ詳細を直接取得して行を復元する。試行済みのIDは再試行しない。
+  const restoreAttemptedRef = useRef<ReadonlySet<string>>(new Set())
+  useEffect(() => {
+    if (!selectedId || rows[selectedId]) return
+    if (restoreAttemptedRef.current.has(selectedId)) return
+    restoreAttemptedRef.current = new Set(restoreAttemptedRef.current).add(
+      selectedId,
+    )
+    const cid = clusterIdOfStoryId(selectedId)
+    if (cid === null) return
+    fetchClusterDetail(cid)
+      .then((detail) => {
+        setRows((prev) => {
+          const next = { ...prev }
+          for (const row of detail.rows) next[row.id] = row
+          return next
+        })
+        setDetailState((prev) => ({ ...prev, [cid]: 'loaded' }))
+        setEditorialState((prev) => ({
+          ...prev,
+          [cid]: detail.editorialsChecked ? 'done' : 'unchecked',
+        }))
+        if (window.matchMedia(NARROW_MEDIA).matches) goToDetailPane()
+      })
+      .catch(() => {
+        /* 復元できなければ通常の一覧表示に委ねる */
+      })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedId, rows])
+
   // 社説の切替は「中身がある場合だけ」出す（空表示の廃止、2026-11-15 ユーザー要望）。
   // 確認の試行前・試行中は切替を出したままにし、完了して初めて「無かった」と確定したら隠す。
   const hasEditorialCoverage =
@@ -1077,6 +1181,7 @@ function App() {
 
   function openStory(id: string) {
     acknowledgeNew()
+    pushRoute({ tab, storyId: id })
     setSelectedId(id)
     setOutletId(null)
     setCoverageKind('summary')
@@ -1089,6 +1194,7 @@ function App() {
 
   function switchTab(next: FeedTab) {
     acknowledgeNew()
+    pushRoute({ tab: next, storyId: null })
     setTab(next)
     setSelectedId(null)
     setOutletId(null)
