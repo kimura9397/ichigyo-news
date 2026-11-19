@@ -937,32 +937,30 @@
   font-weight: 650;
 }
 
-/* 更新通知（Issue #26）: 新しい版がある時だけ出る黄色い「!」と、
-   マウスオーバーで開くパネル。黄色はテーマに依らない注意色として固定する */
+/* 更新通知（Issue #26、表示形式は Issue #51 で変更）: 新しい版がある時だけ
+   出る「vX.Y.Z があります」のテキストと、マウスオーバーで開くパネル。
+   版番号は朱（--vermillion、テーマ連動）の太字、それ以外は muted */
 .update-notice {
   position: relative;
   display: inline-flex;
 }
 
-.update-badge {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 36px;
-  height: 36px;
-  border-radius: 999px;
-  background: #f5b921;
-  color: #1c1712;
-  font-size: 19px;
-  font-weight: 800;
-  line-height: 1;
+.update-link {
+  font-size: calc(12.5px * var(--font-scale));
+  color: var(--muted);
   text-decoration: none;
+  white-space: nowrap;
   cursor: pointer;
 }
 
-.update-badge:hover,
-.update-badge:focus-visible {
-  background: #ffc82e;
+.update-link-version {
+  color: var(--vermillion);
+  font-weight: 700;
+}
+
+.update-link:hover,
+.update-link:focus-visible {
+  text-decoration: underline;
 }
 
 .update-panel {
