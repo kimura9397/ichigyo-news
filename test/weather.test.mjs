@@ -25,7 +25,7 @@ import {
   validateWeatherLocation,
   DEFAULT_WEATHER_LOCATION,
 } from '../src/weather.mjs';
-import { weatherFromRaw, formatTimeNow, formatDateNow } from '../frontend/src/api.ts';
+import { weatherFromRaw, formatTimeNow, formatDateNow, formatSecondsNow } from '../frontend/src/api.ts';
 import { CITIES } from '../frontend/src/cities.ts';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -370,13 +370,20 @@ test('weatherFromRaw: 正常な状態を変換し、天気なし・不正な値�
   assert.equal(weatherFromRaw({ weather: null }), null, '場所が無ければ null');
 });
 
-test('formatTimeNow / formatDateNow: 時刻と日付・曜日を含む', () => {
+test('formatTimeNow / formatDateNow: 時刻と年つきの日付・曜日を含む', () => {
   const date = new Date(2026, 10, 19, 10, 55);
   assert.equal(formatTimeNow(date), '10:55');
   const dateText = formatDateNow(date);
+  assert.ok(dateText.includes('2026'), dateText);
   assert.ok(dateText.includes('11'), dateText);
   assert.ok(dateText.includes('19'), dateText);
   assert.ok(dateText.includes('木'), dateText);
+});
+
+test('formatSecondsNow: コロン＋ゼロ埋め2桁の秒を返す（Issue #45）', () => {
+  assert.equal(formatSecondsNow(new Date(2026, 10, 19, 10, 55, 23)), ':23');
+  assert.equal(formatSecondsNow(new Date(2026, 10, 19, 10, 55, 5)), ':05');
+  assert.equal(formatSecondsNow(new Date(2026, 10, 19, 10, 55, 0)), ':00');
 });
 
 test('フロント: スポットライトに時計と天気と CC BY 4.0 の出典リンクがある', () => {
@@ -389,6 +396,11 @@ test('フロント: スポットライトに時計と天気と CC BY 4.0 の出�
   assert.ok(spot.includes('https://open-meteo.com/'), '出典リンクがありません');
   assert.ok(spot.includes('CC BY 4.0'), 'CC BY 4.0 の表記がありません');
   assert.ok(spot.includes('weather ?'), '天気が無い時に出さない条件分岐がありません');
+  // Issue #45: 天気ボックスと時計ボックスへの分離、セグメントピル、秒表示
+  assert.ok(spot.includes('spotlight-weatherbox'), '天気ボックスがありません');
+  assert.ok(spot.includes('spotlight-clockbox'), '時計ボックスがありません');
+  assert.ok(spot.includes('spotlight-weather-seg'), 'セグメントピルがありません');
+  assert.ok(spot.includes('formatSecondsNow(now)'), '秒を描画していません');
   const app = read('frontend/src/App.tsx');
   assert.ok(app.includes('weather={weatherStatus?.weather ?? null}'), 'App から天気を渡していません');
   assert.ok(app.includes('fetchWeatherStatus()'), '天気の状態を取得していません');
