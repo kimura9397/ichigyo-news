@@ -14,6 +14,7 @@ import {
   addKeywordRemote,
   applyEditorials,
   buildHashRoute,
+  checkForUpdate,
   clusterIdOfStoryId,
   fetchClusterDetail,
   fetchDbStatus,
@@ -32,6 +33,7 @@ import {
   setWeatherLocationRemote,
   versionsOfEvent,
   type PollingState,
+  type UpdateCheckResult,
   type UpdateInfo,
   type WeatherLocation,
   type WeatherStatus,
@@ -177,6 +179,8 @@ function App() {
   const [dbBytes, setDbBytes] = useState<number | null>(null)
   // 更新通知（Issue #26）: 新しい版がある時だけサーバーから渡される。なければ null で何も出さない
   const [updateInfo, setUpdateInfo] = useState<UpdateInfo | null>(null)
+  // 現行バージョン（Issue #47）: サーバーが package.json から読んだ値を表示する。未取得なら null
+  const [appVersion, setAppVersion] = useState<string | null>(null)
   // 天気（Issue #28）: 取得と定期更新はサーバー側。ここでは現在状態の表示と
   // 場所の変更だけを行う。取得できるまではサーバー側の既定（千代田区）で出す
   const [weatherStatus, setWeatherStatus] = useState<WeatherStatus | null>(null)
@@ -217,8 +221,8 @@ function App() {
       .catch(() => {})
   }, [])
   const [maintaining, setMaintaining] = useState(false)
-  // データ整理（保守）の確認ダイアログと、実行結果のトースト
-  const [confirmingMaintenance, setConfirmingMaintenance] = useState(false)
+  // データ整理（保守）の実行結果のトースト。確認は設定メニュー内の
+  // インライン表示で行う（Issue #47）
   const [toast, setToast] = useState<string | null>(null)
   const detailRef = useRef<HTMLElement | null>(null)
   const workspaceRef = useRef<HTMLDivElement | null>(null)
@@ -757,6 +761,7 @@ function App() {
       .then((s) => {
         setDbBytes(s.dbBytes)
         setUpdateInfo(s.update)
+        setAppVersion(s.version)
         applyServerPolling(s.polling)
         if (lastRunIdRef.current === null) lastRunIdRef.current = s.lastRunId
       })
@@ -1246,9 +1251,19 @@ function App() {
     return () => clearTimeout(t)
   }, [toast])
 
+  /**
+   * 設定メニューの「更新を確認」（Issue #47）: サーバーに再チェックを依頼し、
+   * 結果をマストヘッドの更新通知にも同期する。表示用の結果はそのまま返す。
+   */
+  const handleCheckUpdate = useCallback(async (): Promise<UpdateCheckResult> => {
+    const result = await checkForUpdate()
+    setUpdateInfo(result.update)
+    if (result.currentVersion) setAppVersion(result.currentVersion)
+    return result
+  }, [])
+
   async function handleMaintenance() {
     if (maintaining) return
-    setConfirmingMaintenance(false)
     setMaintaining(true)
     try {
       const result = await runMaintenance()
@@ -1452,50 +1467,15 @@ function App() {
               dbBytes={dbBytes}
               formatBytes={formatBytes}
               maintaining={maintaining}
-              setConfirmingMaintenance={setConfirmingMaintenance}
+              onRunMaintenance={() => void handleMaintenance()}
+              appVersion={appVersion}
+              onCheckUpdate={handleCheckUpdate}
               weatherLocation={weatherLocation}
               onSelectWeatherCity={selectWeatherCity}
             />
           </div>
         </div>
       </header>
-      ) : null}
-
-      {confirmingMaintenance ? (
-        <div
-          className="modal-overlay"
-          onClick={() => setConfirmingMaintenance(false)}
-        >
-          <div
-            className="modal-card"
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="maintenance-dialog-title"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <h2 id="maintenance-dialog-title">古いデータを削除しますか？</h2>
-            <p>
-              7日より前のニュース（ブックマークしたものを除く）を削除し、データベースを圧縮します。
-            </p>
-            <div className="modal-actions">
-              <button
-                type="button"
-                className="modal-btn"
-                onClick={() => setConfirmingMaintenance(false)}
-              >
-                キャンセル
-              </button>
-              <button
-                type="button"
-                className="modal-btn is-danger"
-                onClick={() => void handleMaintenance()}
-                disabled={maintaining}
-              >
-                {maintaining ? '削除中…' : '削除して圧縮する'}
-              </button>
-            </div>
-          </div>
-        </div>
       ) : null}
 
       {toast ? (

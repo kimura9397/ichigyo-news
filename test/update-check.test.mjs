@@ -1,13 +1,19 @@
 // 更新通知（Issue #26、2026-11-19）のテスト。
 // - バージョン比較（parseVersion / compareVersions / isNewerVersion）の単体テスト
-// - checkLatestRelease の単体テスト（fetch をスタブに差し替え）:
-//   新しい版がある時だけ情報を返し、同版・旧版・取得失敗・想定外の応答では
-//   すべて null（=何も出さない）になること
+// - checkLatestRelease / fetchLatestRelease の単体テスト（fetch をスタブに差し替え）:
+//   checkLatestRelease は新しい版がある時だけ情報を返し、同版・旧版・取得失敗・
+//   想定外の応答ではすべて null（=何も出さない）になること。
+//   fetchLatestRelease（Issue #47 の手動再チェック用）は新旧によらず最新版の
+//   情報を返し、失敗時だけ null になること
 // - サーバー統合テスト: 起動時に1回だけ確認し、結果が /api/status の
 //   update に載ること。確認先は環境変数 ICHIGYO_UPDATE_CHECK_URL で
 //   ローカルのスタブに差し替える（実 GitHub にはアクセスしない）
+// - 手動再チェック（Issue #47）: POST /api/update-check が再確認して
+//   { currentVersion, update, failed } を返し、結果が /api/status の update にも
+//   反映されること。/api/status に version（現行バージョン）が載ること
 // - フロント: updateFromRaw の変換と、UpdateNotice がホバー表示＋
-//   クリック遷移のみで強制遷移をしないことの静的検査
+//   クリック遷移のみで強制遷移をしないことの静的検査。設定メニューの
+//   バージョン表示・「更新を確認」・データ整理のインライン確認の静的検査
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
@@ -19,7 +25,7 @@ import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { openDb } from '../src/db.mjs';
 import { normalizeForSearch } from '../src/normalize.mjs';
-import { parseVersion, compareVersions, isNewerVersion, checkLatestRelease } from '../src/update-check.mjs';
+import { parseVersion, compareVersions, isNewerVersion, checkLatestRelease, fetchLatestRelease } from '../src/update-check.mjs';
 import { APP_VERSION } from '../src/version.mjs';
 import { updateFromRaw } from '../frontend/src/api.ts';
 
@@ -132,6 +138,33 @@ test('checkLatestRelease: tag_name が無い応答は null、ノートが無け�
     fetchImpl: async () => jsonResponse({ tag_name: 'v9.9.9', html_url: 'https://example.com/r', body: null, published_at: null }),
   });
   assert.deepEqual(noNotes, { version: '9.9.9', url: 'https://example.com/r', notes: '', publishedAt: null });
+});
+
+test('fetchLatestRelease: 新旧によらず最新版の情報を返し、失敗時だけ null', async () => {
+  const newer = await fetchLatestRelease({
+    fetchImpl: async () => jsonResponse(RELEASE),
+  });
+  assert.equal(newer.version, '0.5.0');
+  const same = await fetchLatestRelease({
+    fetchImpl: async () => jsonResponse({ ...RELEASE, tag_name: 'v0.4.0' }),
+  });
+  assert.equal(same.version, '0.4.0', '同版でも情報を返す（最新版かどうかの判定用）');
+  const older = await fetchLatestRelease({
+    fetchImpl: async () => jsonResponse({ ...RELEASE, tag_name: 'v0.3.0' }),
+  });
+  assert.equal(older.version, '0.3.0');
+  const failed = await fetchLatestRelease({
+    fetchImpl: async () => { throw new Error('network down'); },
+  });
+  assert.equal(failed, null);
+  const httpError = await fetchLatestRelease({
+    fetchImpl: async () => jsonResponse({}, { ok: false, status: 503 }),
+  });
+  assert.equal(httpError, null);
+  const noTag = await fetchLatestRelease({
+    fetchImpl: async () => jsonResponse({ html_url: 'https://example.com' }),
+  });
+  assert.equal(noTag, null);
 });
 
 test('APP_VERSION は package.json の version と一致する', () => {
@@ -288,6 +321,63 @@ test('サーバー: 更新確認は起動時の1回だけで、ポーリング�
   assert.ok(!server.includes('setInterval'), '定期実行で更新確認をしています');
 });
 
+test('サーバー: /api/status に現行バージョン（version）が載る', async () => {
+  const stub = await startStub((req, res) => {
+    res.writeHead(200, { 'content-type': 'application/json' });
+    res.end(JSON.stringify({ ...RELEASE, tag_name: `v${APP_VERSION}` }));
+  });
+  const app = await startAppServer(stub.url);
+  try {
+    const s = await statusJson(app.base);
+    assert.equal(s.version, APP_VERSION);
+  } finally {
+    await app.stop();
+    await stub.stop();
+  }
+});
+
+test('サーバー: POST /api/update-check は再確認し、結果が /api/status にも反映される', async () => {
+  // スタブの応答を途中で切り替える: 最初は同版（新版なし）→ 後から新版を出す
+  let stubData = { ...RELEASE, tag_name: `v${APP_VERSION}` };
+  let stubStatus = 200;
+  const stub = await startStub((req, res) => {
+    res.writeHead(stubStatus, { 'content-type': 'application/json' });
+    res.end(JSON.stringify(stubData));
+  });
+  const app = await startAppServer(stub.url);
+  try {
+    // 起動時確認（同版→ update なし）が済むまで待つ
+    await new Promise((r) => setTimeout(r, 2000));
+    const post = async () => {
+      const res = await fetch(`${app.base}/api/update-check`, { method: 'POST' });
+      assert.equal(res.ok, true);
+      return res.json();
+    };
+    const sameResult = await post();
+    assert.equal(sameResult.currentVersion, APP_VERSION);
+    assert.equal(sameResult.update, null, '同版では update は null（最新版）');
+    assert.equal(sameResult.failed, false);
+
+    // 新版が出たら、手動チェックで拾えて /api/status の update にも載る
+    stubData = RELEASE;
+    const newerResult = await post();
+    assert.equal(newerResult.failed, false);
+    assert.equal(newerResult.update.version, '0.5.0');
+    assert.equal(newerResult.update.url, RELEASE.html_url);
+    const s = await statusJson(app.base);
+    assert.equal(s.update.version, '0.5.0', 'マストヘッド通知用に /api/status の update も置き換わる');
+
+    // 取得失敗時は failed=true で、update は据え置き
+    stubStatus = 500;
+    const failedResult = await post();
+    assert.equal(failedResult.failed, true);
+    assert.equal(failedResult.update.version, '0.5.0', '失敗時は前回の update を保持する');
+  } finally {
+    await app.stop();
+    await stub.stop();
+  }
+});
+
 /* ---------- フロント ---------- */
 
 test('updateFromRaw: 正常な更新情報を変換し、不正な値は null にする', () => {
@@ -315,4 +405,32 @@ test('フロント: UpdateNotice はホバーでパネルを出し、遷移は�
   const app = read('frontend/src/App.tsx');
   assert.ok(app.includes('{updateInfo ? <UpdateNotice update={updateInfo} /> : null}'), '新しい版がある時だけ出す条件分岐がありません');
   assert.ok(app.includes('setUpdateInfo(s.update)'), '/api/status の update を画面に反映していません');
+});
+
+test('フロント: 設定メニューにバージョン表示と「更新を確認」がある（Issue #47）', () => {
+  const menu = read('frontend/src/SettingsMenu.tsx');
+  assert.ok(menu.includes('<h3>バージョン</h3>'), 'バージョンセクションがありません');
+  assert.ok(menu.includes('一行ニュース {appVersion'), '「一行ニュース vX.Y.Z」の表示がありません');
+  assert.ok(menu.includes('更新を確認'), '「更新を確認」ボタンがありません');
+  assert.ok(menu.includes('最新版です。'), '最新版の結果表示がありません');
+  assert.ok(menu.includes('があります'), '新版ありの結果表示がありません');
+  assert.ok(menu.includes('リリースページ'), 'リリースページへのリンクがありません');
+  const api = read('frontend/src/api.ts');
+  assert.ok(api.includes("'/api/update-check'"), 'api.ts が POST /api/update-check を呼んでいません');
+  assert.ok(api.includes('version: typeof data.version'), 'fetchServerStatus が version を取り込んでいません');
+  const app = read('frontend/src/App.tsx');
+  assert.ok(app.includes('setAppVersion(s.version)'), '/api/status の version を画面に反映していません');
+  assert.ok(app.includes('setUpdateInfo(result.update)'), '手動チェックの結果をマストヘッド通知へ同期していません');
+});
+
+test('フロント: データ整理はモーダルでなく設定メニュー内のインライン確認（Issue #47）', () => {
+  const menu = read('frontend/src/SettingsMenu.tsx');
+  assert.ok(menu.includes('古いデータを削除してDBを圧縮'), 'データ整理ボタンがありません');
+  assert.ok(menu.includes('元に戻せません。'), '確認表示の説明文がありません');
+  assert.ok(menu.includes('実行する'), '確認表示の「実行する」がありません');
+  assert.ok(menu.includes('やめる'), '確認表示の「やめる」がありません');
+  assert.ok(!menu.includes('confirm('), 'ブラウザ標準の confirm() を使っています');
+  const app = read('frontend/src/App.tsx');
+  assert.ok(!app.includes('modal-overlay'), 'App にモーダルの残骸があります');
+  assert.ok(!app.includes('confirmingMaintenance'), 'App に旧確認ダイアログの状態が残っています');
 });

@@ -1,6 +1,7 @@
 // 更新確認: GitHub Releases の latest を確認し、現行バージョンより新しい版が
 // あればその情報を返す（Issue #26、2026-11-19 ユーザー設計）。
-// - 呼び出しは server.mjs の起動時に1回だけ。ポーリングには相乗りさせない
+// - 呼び出しは server.mjs の起動時に1回と、設定メニューの「更新を確認」
+//   （POST /api/update-check）の手動再チェック時。ポーリングには相乗りさせない
 // - 取得に失敗したら null を返す（何も知らせない）。新しい版がなくても null
 // - /releases/latest は GitHub の仕様でドラフトとプレリリースを除いた最新の
 //   安定版を返すので、ここで追加の除外はしない
@@ -81,12 +82,13 @@ export function isNewerVersion(latest, current) {
 }
 
 /**
- * GitHub Releases の latest を1回確認する。新しい版がある場合だけ
- * { version, url, notes, publishedAt } を返し、それ以外（新版なし・取得失敗・
- * 応答が想定外）はすべて null を返す。
+ * GitHub Releases の latest を1回取得し、版の新旧によらずリリース情報を
+ * { version, url, notes, publishedAt } で返す。取得に失敗した・応答が想定外の
+ * 場合は null。手動の「更新を確認」（POST /api/update-check）が、最新版か
+ * どうかと取得失敗を区別するために使う。
  * fetchImpl はテスト用の差し替え口（通常はグローバルの fetch）。
  */
-export async function checkLatestRelease({ currentVersion, url = LATEST_RELEASE_URL, fetchImpl = fetch } = {}) {
+export async function fetchLatestRelease({ url = LATEST_RELEASE_URL, fetchImpl = fetch } = {}) {
   try {
     const res = await fetchImpl(url, {
       headers: {
@@ -98,7 +100,7 @@ export async function checkLatestRelease({ currentVersion, url = LATEST_RELEASE_
     if (!res || !res.ok) return null;
     const data = JSON.parse(await readResponseText(res, MAX_RELEASE_BYTES));
     const tag = typeof data?.tag_name === 'string' ? data.tag_name : '';
-    if (!tag || !isNewerVersion(tag, currentVersion)) return null;
+    if (!tag) return null;
     return {
       version: tag.replace(/^v/i, ''),
       url: typeof data.html_url === 'string' ? data.html_url : '',
@@ -108,4 +110,16 @@ export async function checkLatestRelease({ currentVersion, url = LATEST_RELEASE_
   } catch {
     return null;
   }
+}
+
+/**
+ * GitHub Releases の latest を1回確認する。新しい版がある場合だけ
+ * { version, url, notes, publishedAt } を返し、それ以外（新版なし・取得失敗・
+ * 応答が想定外）はすべて null を返す。
+ * fetchImpl はテスト用の差し替え口（通常はグローバルの fetch）。
+ */
+export async function checkLatestRelease({ currentVersion, url = LATEST_RELEASE_URL, fetchImpl = fetch } = {}) {
+  const latest = await fetchLatestRelease({ url, fetchImpl });
+  if (!latest || !isNewerVersion(latest.version, currentVersion)) return null;
+  return latest;
 }

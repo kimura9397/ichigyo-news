@@ -17,7 +17,7 @@ import { normalizeForSearch } from './src/normalize.mjs';
 import { listKeywords, addKeyword as addKeywordToDb, removeKeyword as removeKeywordFromDb } from './src/keywords.mjs';
 import { runningAsSea, readSeaAsset, defaultDataDir, openBrowser } from './src/sea.mjs';
 import { APP_VERSION } from './src/version.mjs';
-import { checkLatestRelease, LATEST_RELEASE_URL } from './src/update-check.mjs';
+import { checkLatestRelease, fetchLatestRelease, isNewerVersion, LATEST_RELEASE_URL } from './src/update-check.mjs';
 import { fetchWeather, validateWeatherLocation, DEFAULT_WEATHER_LOCATION } from './src/weather.mjs';
 
 // SEA 実行時は import.meta.url が得られないため、その場合は cwd を基点にする
@@ -146,15 +146,37 @@ function restorePolling() {
 }
 restorePolling();
 
-/* ---------- 更新通知（起動時に1回だけ確認、Issue #26） ---------- */
-// GitHub Releases の latest を起動時に1回だけ確認し、現行バージョンより
+/* ---------- 更新通知（起動時に1回確認＋設定から手動再チェック、Issue #26 / #47） ---------- */
+// GitHub Releases の latest を起動時に1回確認し、現行バージョンより
 // 新しい版がある場合だけ /api/status の update に載せる。ポーリングには
 // 相乗りさせない。取得に失敗したら update は null のまま（何も知らせない）。
+// 設定メニューの「更新を確認」（POST /api/update-check）でも同じ確認を
+// 再実行できる（Issue #47）。
 // 確認先はテスト用に環境変数で差し替えられる（通常は GitHub API のまま）。
 const UPDATE_CHECK_URL = process.env.ICHIGYO_UPDATE_CHECK_URL || LATEST_RELEASE_URL;
 let updateInfo = null;
 void checkLatestRelease({ currentVersion: APP_VERSION, url: UPDATE_CHECK_URL })
   .then((info) => { updateInfo = info; });
+
+/**
+ * 手動の再チェック（POST /api/update-check、Issue #47）。起動時と同じ確認を
+ * もう一度行い、保持している update 情報を最新の結果に置き換える（新しい版が
+ * 見つかればマストヘッドの通知にもそのまま反映される）。取得できたかどうかを
+ * 返す: true = 判定できた（新版の有無は updateInfo 側）、false = 取得失敗で
+ * 判定できなかった（updateInfo は据え置き）。同時実行は1本に絞る。
+ */
+let updateCheckInFlight = null;
+function recheckUpdate() {
+  if (!updateCheckInFlight) {
+    updateCheckInFlight = (async () => {
+      const latest = await fetchLatestRelease({ url: UPDATE_CHECK_URL });
+      if (!latest) return false;
+      updateInfo = isNewerVersion(latest.version, APP_VERSION) ? latest : null;
+      return true;
+    })().finally(() => { updateCheckInFlight = null; });
+  }
+  return updateCheckInFlight;
+}
 
 /* ---------- 天気（サーバー側の定期取得、Issue #28） ---------- */
 // 天気の取得はサーバー側で持つ。ニュースのポーリングとは独立のタイマーで
@@ -579,9 +601,16 @@ const server = createServer(async (req, res) => {
       if (!location) return sendJson(res, 400, { error: 'invalid location', ...weatherStatus() });
       return sendJson(res, 200, setWeatherLocation(location));
     }
+    if (p === '/api/update-check' && req.method === 'POST') {
+      // 設定メニューの「更新を確認」（Issue #47）: 起動時と同じ確認を再実行し、
+      // 保持中の update 情報を置き換える。failed は取得失敗で判定できなかった
+      // ことを表す（その場合 update は据え置きの値を返す）。
+      const checked = await recheckUpdate();
+      return sendJson(res, 200, { currentVersion: APP_VERSION, update: updateInfo, failed: !checked });
+    }
     if (p === '/api/status' && req.method === 'GET') {
       const counts = db.prepare('SELECT (SELECT COUNT(*) FROM clusters) AS clusters, (SELECT COUNT(*) FROM versions) AS versions, (SELECT COUNT(*) FROM articles) AS articles').get();
-      return sendJson(res, 200, { lastRun: lastFinishedRun(), counts, refreshing: refreshing !== null, db_bytes: dbBytes(), polling: pollingStatus(), update: updateInfo });
+      return sendJson(res, 200, { lastRun: lastFinishedRun(), counts, refreshing: refreshing !== null, db_bytes: dbBytes(), polling: pollingStatus(), update: updateInfo, version: APP_VERSION });
     }
     // 静的配信: デコード＋正規化し、public/ 配下から出るパスは拒否する
     let rel;
