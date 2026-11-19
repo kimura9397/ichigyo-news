@@ -18,13 +18,17 @@
 // 停止は表示内の「スポットライトを停止」ボタンだけ（ユーザーの明示指示）:
 // マウス移動・他の場所のクリック・キー操作では止めない。
 // トップバーの右側には現在時刻（日付・曜日つき、外部依存なし）と天気
-// （サーバーが Open-Meteo から取得した分だけ）を小さく出す（Issue #28）。
+// （サーバーが Open-Meteo から取得した分だけ）を出す（Issue #28）。
+// 時刻・天気・出典でサイズと揃えが混在して段差に見えたため、行全体の
+// 垂直位置を center に統一し、時刻と気温を大きく、日付と詳細を小さく
+// 従える二層の見た目に整えた（Issue #35）。
 // 天気の表示には利用条件として open-meteo.com への CC BY 4.0 出典リンクを付ける。
 import { useEffect, useRef, useState } from 'react'
 import {
   fetchClusterDetail,
   fetchTabRows,
-  formatNow,
+  formatDateNow,
+  formatTimeNow,
   formatWhen,
   safeUrl,
   type WeatherInfo,
@@ -67,6 +71,119 @@ interface DetailEntry {
   row: StoryRow
   /** そのクラスタの全版数 */
   versionCount: number
+}
+
+/** 天気コード（WMO）をアイコンの種類に対応づける（サーバー側の天気名の区分けに合わせる） */
+function weatherIconKind(
+  code: number,
+): 'sun' | 'partly' | 'cloud' | 'fog' | 'drizzle' | 'rain' | 'snow' | 'thunder' {
+  if (code === 0 || code === 1) return 'sun'
+  if (code === 2) return 'partly'
+  if (code === 3) return 'cloud'
+  if (code === 45 || code === 48) return 'fog'
+  if (code >= 51 && code <= 57) return 'drizzle'
+  if ((code >= 61 && code <= 67) || (code >= 80 && code <= 82)) return 'rain'
+  if ((code >= 71 && code <= 77) || code === 85 || code === 86) return 'snow'
+  if (code >= 95) return 'thunder'
+  return 'cloud'
+}
+
+const CLOUD_PATH = 'M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z'
+const SUN_RAY_PATHS = [
+  'M12 2v2',
+  'M12 20v2',
+  'M4.93 4.93l1.41 1.41',
+  'M17.66 17.66l1.41 1.41',
+  'M2 12h2',
+  'M20 12h2',
+  'M4.93 19.07l1.41-1.41',
+  'M17.66 6.34l1.41-1.41',
+]
+
+/** 天気アイコン（inline SVG）。天気名のテキストが隣にあるため装飾のみ（aria-hidden）。 */
+function WeatherIcon({ code }: { code: number }) {
+  const kind = weatherIconKind(code)
+  return (
+    <svg
+      width="27"
+      height="27"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.7"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+      focusable="false"
+    >
+      {kind === 'sun' ? (
+        <>
+          <circle cx="12" cy="12" r="4" />
+          {SUN_RAY_PATHS.map((d) => (
+            <path key={d} d={d} />
+          ))}
+        </>
+      ) : null}
+      {kind === 'partly' ? (
+        <>
+          <g transform="translate(0 -1.5) scale(0.55)">
+            <circle cx="12" cy="12" r="4" />
+            {SUN_RAY_PATHS.map((d) => (
+              <path key={d} d={d} />
+            ))}
+          </g>
+          <g transform="translate(5 7) scale(0.7)">
+            <path d={CLOUD_PATH} />
+          </g>
+        </>
+      ) : null}
+      {kind === 'cloud' ? <path d={CLOUD_PATH} /> : null}
+      {kind === 'fog' ? (
+        <>
+          <g transform="translate(0 -3) scale(0.95)">
+            <path d={CLOUD_PATH} />
+          </g>
+          <path d="M5 19h14" />
+          <path d="M7.5 21.5h9" />
+        </>
+      ) : null}
+      {kind === 'drizzle' || kind === 'rain' || kind === 'snow' || kind === 'thunder' ? (
+        <>
+          <g transform="translate(1 -1) scale(0.92)">
+            <path d={CLOUD_PATH} />
+          </g>
+          {kind === 'drizzle' ? (
+            <>
+              <path d="M8 20.5v1.4" />
+              <path d="M12 20.5v1.4" />
+              <path d="M16 20.5v1.4" />
+            </>
+          ) : null}
+          {kind === 'rain' ? (
+            <>
+              <path d="M8.5 20l-1 2.2" />
+              <path d="M12.5 20l-1 2.2" />
+              <path d="M16.5 20l-1 2.2" />
+            </>
+          ) : null}
+          {kind === 'snow' ? (
+            <>
+              <circle cx="8" cy="21" r="1.1" fill="currentColor" stroke="none" />
+              <circle cx="12.5" cy="22" r="1.1" fill="currentColor" stroke="none" />
+              <circle cx="17" cy="21" r="1.1" fill="currentColor" stroke="none" />
+            </>
+          ) : null}
+          {kind === 'thunder' ? (
+            <path
+              d="M12.6 16.8l-2.5 3.8h2l-1.2 3 3.6-4.4h-2.1l1.2-2.4z"
+              fill="currentColor"
+              stroke="none"
+            />
+          ) : null}
+        </>
+      ) : null}
+    </svg>
+  )
 }
 
 export default function Spotlight({
@@ -283,6 +400,20 @@ export default function Spotlight({
     if (items.length > 1) ensureDetail(items[(effIndex + 1) % items.length])
   }, [items, effIndex])
 
+  /** 天気の従情報（最高／最低・降水確率）。ある分だけを並べる */
+  const weatherDetail = weather
+    ? [
+        weather.max !== null && weather.min !== null
+          ? `最高 ${Math.round(weather.max)}℃ / 最低 ${Math.round(weather.min)}℃`
+          : null,
+        weather.precipitationProbability !== null
+          ? `降水確率 ${Math.round(weather.precipitationProbability)}%`
+          : null,
+      ]
+        .filter((part): part is string => part !== null)
+        .join('　')
+    : ''
+
   return (
     <div className="spotlight">
       <div className="spotlight-head">
@@ -297,27 +428,31 @@ export default function Spotlight({
             </span>
           ) : null}
           <div className="spotlight-now">
-            <time className="spotlight-clock">{formatNow(now)}</time>
+            <span className="spotlight-clockset">
+              <span className="spotlight-date">{formatDateNow(now)}</span>
+              <time className="spotlight-clock">{formatTimeNow(now)}</time>
+            </span>
             {weather ? (
               <span className="spotlight-weather">
-                <span>
-                  {weatherLocationName} {weather.label}{' '}
-                  {weather.temperature.toFixed(1)}℃
-                  {weather.max !== null && weather.min !== null
-                    ? `　最高 ${Math.round(weather.max)}℃ / 最低 ${Math.round(weather.min)}℃`
-                    : ''}
-                  {weather.precipitationProbability !== null
-                    ? `　降水確率 ${Math.round(weather.precipitationProbability)}%`
-                    : ''}
+                <WeatherIcon code={weather.weatherCode} />
+                <span className="spotlight-weather-main">
+                  <span className="spotlight-weather-temp">
+                    {weather.temperature.toFixed(1)}℃
+                  </span>
+                  <span className="spotlight-weather-label">{weather.label}</span>
                 </span>
-                <a
-                  className="spotlight-weather-source"
-                  href="https://open-meteo.com/"
-                  target="_blank"
-                  rel="noreferrer"
-                >
-                  Open-Meteo (CC BY 4.0)
-                </a>
+                <span className="spotlight-weather-sub">
+                  <span>{weatherLocationName}</span>
+                  {weatherDetail ? <span>{weatherDetail}</span> : null}
+                  <a
+                    className="spotlight-weather-source"
+                    href="https://open-meteo.com/"
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    Open-Meteo (CC BY 4.0)
+                  </a>
+                </span>
               </span>
             ) : null}
           </div>

@@ -109,13 +109,19 @@ export function safeUrl(url: string | null | undefined): string {
   }
 }
 
-/** 現在時刻を「M/D(曜) HH:mm」形式に整える（スポットライトの時計表示用）。 */
-export function formatNow(date: Date): string {
+/** 時刻だけを「HH:mm」形式に整える（スポットライトの時計表示用）。 */
+export function formatTimeNow(date: Date): string {
+  return new Intl.DateTimeFormat('ja-JP', {
+    hour: '2-digit',
+    minute: '2-digit',
+  }).format(date)
+}
+
+/** 日付だけを「M/D(曜)」形式に整える（スポットライトの時計表示用）。 */
+export function formatDateNow(date: Date): string {
   return new Intl.DateTimeFormat('ja-JP', {
     month: 'numeric',
     day: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
     weekday: 'short',
   }).format(date)
 }
