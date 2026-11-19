@@ -6,7 +6,7 @@ import {
   type SetStateAction,
 } from 'react'
 import type { DensitySetting, FontSizeSetting, ThemePreset } from './App'
-import type { WeatherLocation } from './api'
+import type { UpdateCheckResult, WeatherLocation } from './api'
 import { CITIES, type CityEntry } from './cities'
 
 /** 市区町村の表示名（都道府県＋市区町村）。同名市区町村の取り違えを防ぐ。 */
@@ -43,7 +43,12 @@ interface SettingsMenuProps {
   dbBytes: number | null
   formatBytes: (bytes: number) => string
   maintaining: boolean
-  setConfirmingMaintenance: Dispatch<SetStateAction<boolean>>
+  /** データ整理の実行（確認はこのメニュー内のインライン表示で行う） */
+  onRunMaintenance: () => void
+  /** 現行バージョン（サーバーから取得した値。未取得なら null） */
+  appVersion: string | null
+  /** 「更新を確認」: サーバーへ再チェックを依頼し、結果を返す */
+  onCheckUpdate: () => Promise<UpdateCheckResult>
   /** 天気の場所（サーバー側に保存された現在値） */
   weatherLocation: WeatherLocation
   /** 天気の場所の変更（同梱リストから選んだ1件をサーバーへ保存する） */
@@ -81,11 +86,37 @@ export default function SettingsMenu(props: SettingsMenuProps) {
     dbBytes,
     formatBytes,
     maintaining,
-    setConfirmingMaintenance,
+    onRunMaintenance,
+    appVersion,
+    onCheckUpdate,
     weatherLocation,
     onSelectWeatherCity,
   } = props
   const menuRef = useRef<HTMLDivElement | null>(null)
+
+  // データ整理のインライン確認（Issue #47）。押すとその場が確認表示に
+  // 切り替わり、「実行する」で App 側の整理処理を呼ぶ。結果はトーストで出る。
+  const [confirmingPrune, setConfirmingPrune] = useState(false)
+
+  // 「更新を確認」（Issue #47）の状態。結果はこの場に表示し、マストヘッドの
+  // 更新通知へは App 側（onCheckUpdate 内）で同期される。
+  const [checkingUpdate, setCheckingUpdate] = useState(false)
+  const [updateResult, setUpdateResult] = useState<UpdateCheckResult | null>(null)
+  const [updateCheckFailed, setUpdateCheckFailed] = useState(false)
+  const handleCheckUpdate = async () => {
+    if (checkingUpdate) return
+    setCheckingUpdate(true)
+    setUpdateResult(null)
+    setUpdateCheckFailed(false)
+    try {
+      setUpdateResult(await onCheckUpdate())
+    } catch {
+      // サーバー自体に届かなかった場合（ネットワーク断など）
+      setUpdateCheckFailed(true)
+    } finally {
+      setCheckingUpdate(false)
+    }
+  }
 
   // 天気の場所の検索欄。同梱リストの表示名と完全一致した時点で選択として
   // サーバーへ保存する（入力途中の文字列は保存しない）。地名の照合は
@@ -110,6 +141,11 @@ export default function SettingsMenu(props: SettingsMenuProps) {
       })
     }
   }
+
+  // メニューを閉じたら、データ整理の確認表示は元のボタンに戻す
+  useEffect(() => {
+    if (!menuOpen) setConfirmingPrune(false)
+  }, [menuOpen])
 
   // 設定メニューは外側クリックと Esc で閉じる
   useEffect(() => {
@@ -387,20 +423,83 @@ export default function SettingsMenu(props: SettingsMenuProps) {
                         {dbBytes !== null ? formatBytes(dbBytes) : '—'}
                       </span>
                     </div>
+                    {confirmingPrune ? (
+                      <div className="menu-confirm">
+                        <p className="menu-note">
+                          7日より前のニュース（ブックマークを除く）を削除して、DBを圧縮します。元に戻せません。
+                        </p>
+                        <div className="menu-confirm-actions">
+                          <button
+                            type="button"
+                            className="menu-action-btn is-danger"
+                            onClick={() => {
+                              setConfirmingPrune(false)
+                              onRunMaintenance()
+                            }}
+                            disabled={maintaining}
+                          >
+                            {maintaining ? '削除中…' : '実行する'}
+                          </button>
+                          <button
+                            type="button"
+                            className="menu-action-btn"
+                            onClick={() => setConfirmingPrune(false)}
+                            disabled={maintaining}
+                          >
+                            やめる
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <>
+                        <button
+                          type="button"
+                          className="menu-action-btn"
+                          onClick={() => setConfirmingPrune(true)}
+                          disabled={maintaining}
+                        >
+                          古いデータを削除してDBを圧縮
+                        </button>
+                        <p className="menu-note">
+                          7日より前のニュース（ブックマークしたものを除く）を削除します。実行前に確認が出ます。
+                        </p>
+                      </>
+                    )}
+                  </section>
+                  <section className="menu-section">
+                    <h3>バージョン</h3>
+                    <p className="menu-version">
+                      一行ニュース {appVersion ? `v${appVersion}` : ''}
+                    </p>
                     <button
                       type="button"
                       className="menu-action-btn"
-                      onClick={() => {
-                        setMenuOpen(false)
-                        setConfirmingMaintenance(true)
-                      }}
-                      disabled={maintaining}
+                      onClick={() => void handleCheckUpdate()}
+                      disabled={checkingUpdate}
                     >
-                      古いデータを削除してDBを圧縮
+                      {checkingUpdate ? '確認中…' : '更新を確認'}
                     </button>
-                    <p className="menu-note">
-                      7日より前のニュース（ブックマークしたものを除く）を削除します。実行前に確認ダイアログが出ます。
-                    </p>
+                    {updateResult || updateCheckFailed ? (
+                      <p className="menu-note" role="status">
+                        {updateCheckFailed || updateResult?.failed ? (
+                          '更新を確認できませんでした。'
+                        ) : updateResult?.update ? (
+                          <>
+                            v{updateResult.update.version} があります（
+                            <a
+                              href={updateResult.update.url}
+                              target="_blank"
+                              rel="noreferrer"
+                            >
+                              リリースページ
+                            </a>
+                            ）
+                          </>
+                        ) : (
+                          '最新版です。'
+                        )}
+                      </p>
+                    ) : null}
                   </section>
                 </div>
               ) : null}

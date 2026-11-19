@@ -607,6 +607,8 @@ export interface ServerStatus {
   polling: PollingState
   /** 新しい版がある時だけ非 null（更新通知、Issue #26） */
   update: UpdateInfo | null
+  /** 現行バージョン（サーバーが package.json から読んだ値、Issue #47）。取得できなければ null */
+  version: string | null
 }
 
 /** サーバーのステータス（DB容量・収集中か・最終収集・ポーリング状態）を取得する。 */
@@ -617,6 +619,7 @@ export async function fetchServerStatus(): Promise<ServerStatus> {
     lastRun?: { id?: number; finished_at?: string } | null
     polling?: RawPolling
     update?: RawUpdate | null
+    version?: string
   }>('/api/status')
   return {
     dbBytes: data.db_bytes ?? 0,
@@ -625,6 +628,34 @@ export async function fetchServerStatus(): Promise<ServerStatus> {
     lastRunFinishedAt: data.lastRun?.finished_at ?? null,
     polling: pollingFromRaw(data.polling),
     update: updateFromRaw(data.update),
+    version: typeof data.version === 'string' && data.version ? data.version : null,
+  }
+}
+
+/** 「更新を確認」の結果（Issue #47）。 */
+export interface UpdateCheckResult {
+  /** サーバーが答えた現行バージョン。取得できなければ null */
+  currentVersion: string | null
+  /** 新しい版がある時だけ非 null（サーバー保持の更新情報と一致する） */
+  update: UpdateInfo | null
+  /** 取得に失敗して判定できなかった場合は true */
+  failed: boolean
+}
+
+/** 設定メニューの「更新を確認」: サーバーに最新版チェックの再実行を依頼する。 */
+export async function checkForUpdate(): Promise<UpdateCheckResult> {
+  const data = await fetchJson<{
+    currentVersion?: string
+    update?: RawUpdate | null
+    failed?: boolean
+  }>('/api/update-check', { method: 'POST' })
+  return {
+    currentVersion:
+      typeof data.currentVersion === 'string' && data.currentVersion
+        ? data.currentVersion
+        : null,
+    update: updateFromRaw(data.update),
+    failed: data.failed === true,
   }
 }
 
