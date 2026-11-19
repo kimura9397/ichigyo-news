@@ -76,9 +76,11 @@ function jsonResponse(data, { ok = true, status = 200 } = {}) {
   return { ok, status, text: async () => JSON.stringify(data) };
 }
 
+// 「現行版より新しい版」の役。実在の次版番号を使うと、その版へ bump した
+// 途端に「新しくない」扱いになりサーバー統合テストが落ちるため、遠い将来版にする。
 const RELEASE = {
-  tag_name: 'v0.5.0',
-  html_url: 'https://github.com/kimura9397/ichigyo-news/releases/tag/v0.5.0',
+  tag_name: 'v9.9.9',
+  html_url: 'https://github.com/kimura9397/ichigyo-news/releases/tag/v9.9.9',
   body: '## 変更点\n新しい版です。',
   published_at: '2026-11-19T00:00:00Z',
 };
@@ -89,8 +91,8 @@ test('checkLatestRelease: 新しい版があれば版・URL・ノート・公開
     fetchImpl: async () => jsonResponse(RELEASE),
   });
   assert.deepEqual(info, {
-    version: '0.5.0',
-    url: 'https://github.com/kimura9397/ichigyo-news/releases/tag/v0.5.0',
+    version: '9.9.9',
+    url: 'https://github.com/kimura9397/ichigyo-news/releases/tag/v9.9.9',
     notes: '## 変更点\n新しい版です。',
     publishedAt: '2026-11-19T00:00:00Z',
   });
@@ -144,7 +146,7 @@ test('fetchLatestRelease: 新旧によらず最新版の情報を返し、失敗
   const newer = await fetchLatestRelease({
     fetchImpl: async () => jsonResponse(RELEASE),
   });
-  assert.equal(newer.version, '0.5.0');
+  assert.equal(newer.version, '9.9.9');
   const same = await fetchLatestRelease({
     fetchImpl: async () => jsonResponse({ ...RELEASE, tag_name: 'v0.4.0' }),
   });
@@ -269,7 +271,7 @@ test('サーバー: 新しい版があると /api/status の update に載る', 
   try {
     const update = await waitUpdate(app.base);
     assert.ok(update, 'update が載りませんでした');
-    assert.equal(update.version, '0.5.0');
+    assert.equal(update.version, '9.9.9');
     assert.equal(update.url, RELEASE.html_url);
     assert.equal(update.notes, RELEASE.body);
     assert.equal(update.publishedAt, RELEASE.published_at);
@@ -362,16 +364,16 @@ test('サーバー: POST /api/update-check は再確認し、結果が /api/stat
     stubData = RELEASE;
     const newerResult = await post();
     assert.equal(newerResult.failed, false);
-    assert.equal(newerResult.update.version, '0.5.0');
+    assert.equal(newerResult.update.version, '9.9.9');
     assert.equal(newerResult.update.url, RELEASE.html_url);
     const s = await statusJson(app.base);
-    assert.equal(s.update.version, '0.5.0', 'マストヘッド通知用に /api/status の update も置き換わる');
+    assert.equal(s.update.version, '9.9.9', 'マストヘッド通知用に /api/status の update も置き換わる');
 
     // 取得失敗時は failed=true で、update は据え置き
     stubStatus = 500;
     const failedResult = await post();
     assert.equal(failedResult.failed, true);
-    assert.equal(failedResult.update.version, '0.5.0', '失敗時は前回の update を保持する');
+    assert.equal(failedResult.update.version, '9.9.9', '失敗時は前回の update を保持する');
   } finally {
     await app.stop();
     await stub.stop();
