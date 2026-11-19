@@ -1385,6 +1385,7 @@
    ルートをビューポート高に固定した flex 列にし、はみ出す分は各紙カードの
    抜粋を行数クランプで切り落として吸収する。スクロールは出さない */
 .spotlight {
+  position: relative;
   flex: 1;
   min-height: 0;
   overflow: hidden;
@@ -1436,31 +1437,71 @@
   animation: spotlight-notice-in 0.25s ease;
 }
 
-/* 前へ／次へボタン（Issue #41）。時刻＋天気チップの左に並べる。
-   トップバーの右寄せの起点はこのグループが持ち、チップはその右に続く */
-.spotlight-nav {
-  flex: none;
-  margin-inline-start: auto;
+/* 前へ／次へボタン（Issue #41 でトップバーに追加、Issue #43 でステージ
+   下部中央のフローティングピルに移設）。候補モックの比較でユーザーが
+   選んだ B 案（動画プレイヤーの作法）に基づく。地は半透明の墨
+   （--ink を約80%＋透過）で文字・アイコンは --paper とし、テーマが
+   替わっても沈む／浮く関係が保たれるようにする。普段は薄く沈め、
+   ホバー／フォーカスで濃くしてアンビエント表示の邪魔をしない */
+.spotlight-floatnav {
+  position: absolute;
+  left: 50%;
+  bottom: 18px;
+  transform: translateX(-50%);
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: 4px;
+  padding: 6px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--ink) 80%, transparent);
+  color: var(--paper);
+  opacity: 0.5;
+  transition: opacity 0.15s ease;
+}
+
+.spotlight-floatnav:hover,
+.spotlight-floatnav:focus-within {
+  opacity: 1;
+}
+
+.spotlight-floatnav-btn {
+  appearance: none;
+  flex: none;
+  width: 38px;
+  height: 38px;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: inherit;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.spotlight-floatnav-btn:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--paper) 18%, transparent);
 }
 
 /* 無効化は「移動先がない（1件以下）」ためであり処理中ではないので、
-   .icon-btn の既定の cursor: wait は使わず通常のカーソルに戻す */
-.spotlight-nav .icon-btn:disabled {
+   待機カーソルにはせず通常のカーソルに戻し、色も沈める */
+.spotlight-floatnav-btn:disabled {
   cursor: default;
+  opacity: 0.45;
 }
 
 /* 現在時刻と天気（Issue #28、見た目を Issue #35 で二層に整え、Issue #39 で
-   チップ型に変更）。前へ／次へボタン（Issue #41）の右に続けて出す。全画面ボタンは
-   この右に続く（既定の margin-inline-start: auto は打ち消す）。
+   チップ型に変更）。トップバーの右寄せの起点はこのチップが持つ（前へ／次へ
+   ボタンは Issue #43 でステージ下部のフローティングピルへ移設した）。
+   全画面ボタンはこの右に続く（既定の margin-inline-start: auto は打ち消す）。
    Issue #35 の二層表示が「細字でカスカスに見える」という指摘を受け、
    候補モックから選ばれた案28（TV ニュースの隅表示の並び＋半透明チップ）
    に置き換えた: 時刻＋天気のブロック全体を1つのチップにまとめ、先頭に
    LIVE タグを置き、時刻・気温は太字にする。チップの地は「薄める方向の
    混色ベース」(--tint-base) を半透明に混ぜたもので、全テーマに追随する */
 .spotlight-now {
+  margin-inline-start: auto;
   display: flex;
   flex-wrap: wrap;
   align-items: center;
@@ -1612,6 +1653,10 @@
   display: flex;
   flex-direction: column;
   padding-top: clamp(18px, 3vh, 40px);
+  /* 下部中央のフローティングピル（Issue #43、下端18px＋高さ約50px）に
+     各紙カードの下端（元記事リンク）が被らないよう、下側に逃げを取る。
+     各紙グリッドは flex で残り高さを受けるため、1画面フィットは保たれる */
+  padding-bottom: 52px;
 }
 
 .spotlight-meta {
