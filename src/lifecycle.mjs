@@ -9,7 +9,7 @@
 //   purgeBodyData で消去する（サーバー起動時と refresh のライフサイクルで実行、冪等）。
 import { editorialRelated } from './editorials.mjs';
 import { importanceFor, refineCategory } from './classify.mjs';
-import { bigrams, filterWeakBigrams, matchScore, jaccard, strongTerms, summaryWords, stripBoilerplate, hasStoryAnchor, isNumericOnlyRevision } from './matching.mjs';
+import { bigrams, filterWeakBigrams, matchScore, jaccard, strongTerms, summaryWords, stripBoilerplate, hasStoryAnchor, isNumericOnlyRevision, properTerms, sharedCount, hasDateConflict } from './matching.mjs';
 import { normalizeForSearch, buildArticleSearchText } from './normalize.mjs';
 
 export const RETENTION_DAYS = 7;
@@ -247,9 +247,17 @@ export function splitOverMergedClusters(db) {
  * られないため残し、正当な記事だけをベースに加える。
  * オプション p0Base は hasStoryAnchor の P0 ベース実験（Issue #56）を修復側にも
  * 通すためのもので、通常の保守実行では渡さない（既定の物差しで判定する）。
+ * オプション summaryValve は記事単位判定の要約バルブの固有名詞条件（監査の
+ * 方向5、Issue #59）: 既定の 'proper' では、要約の語彙共有4以上に加えて、
+ * 記事タイトルとベース（受理済み版のタイトル群）との間で固有名詞っぽい語
+ * （カタカナ・英字）の共有1以上を必須にする。従来は要約の共有だけで足りた
+ * ため、通信社の定型要約に埋もれた別ニュースの版が混在型として残っていた
+ * （実例: 誤合体クラスタに残った首脳会談・モンゴル国会・米中行動計画の版は、
+ * 要約の共有語が配信元の定型語と話題の汎用語だけで、タイトル同士の固有名詞
+ * 共有はなかった）。'or' を渡すと従来どおり要約の共有だけで足りる。
  * 切り出した版の数を返す。
  */
-export function splitForeignVersions(db, { p0Base } = {}) {
+export function splitForeignVersions(db, { p0Base, summaryValve = 'proper' } = {}) {
   const clusters = db.prepare('SELECT id, title, category FROM clusters').all();
   if (!clusters.length) return 0;
   const versionsStmt = db.prepare('SELECT id, version_no, title FROM versions WHERE cluster_id = ? ORDER BY version_no');
@@ -272,12 +280,23 @@ export function splitForeignVersions(db, { p0Base } = {}) {
       const baseP0ArticleTitles = [];
       const baseSummaryWords = new Set();
       const addSummaryWords = (arts) => { for (const a of arts) for (const w of summaryWords(a.summary)) baseSummaryWords.add(w); };
+      // 要約バルブの固有名詞条件（方向5）用のベース: 受理済み版のタイトル群が持つ
+      // 固有名詞っぽい語（カタカナ・英字）。標題も最初からベースに含める
+      const baseProperTerms = new Set(properTerms(stripBoilerplate(c.title)));
+      const addProperTerms = (titles) => { for (const t of titles) for (const w of properTerms(stripBoilerplate(t))) baseProperTerms.add(w); };
       const articleAnchored = (a, titleOnly = false) => {
+        // 日替わり定型の例外（方向6）: 日付が食い違う記事は要約バルブでも救わない。
+        // ベースはクラスタ標題と基準版の標題に限る（記事の標題までは見ない:
+        // 基準側が別日分で汚染されている場合に正当な記事まで落とさないため）
+        if (hasDateConflict(a.title, [c.title, ...baseVersionTitles])) return false;
         if (hasStoryAnchor(a.title, c.title, baseVersionTitles, baseArticleTitles, { strict: true, p0Base, p0ArticleTitles: baseP0ArticleTitles })) return true;
         if (titleOnly) return false;
         let n = 0;
         for (const w of summaryWords(a.summary)) if (baseSummaryWords.has(w)) n++;
-        return n >= 4;
+        if (n < 4) return false;
+        if (summaryValve === 'or') return true;
+        // 要約の共有だけでは足りない: タイトル同士で固有名詞っぽい語を共有すること
+        return sharedCount(properTerms(stripBoilerplate(a.title)), baseProperTerms) >= 1;
       };
       let isFirst = true;
       for (const v of versions) {
@@ -287,6 +306,7 @@ export function splitForeignVersions(db, { p0Base } = {}) {
           for (const a of arts) baseArticleTitles.push(a.title);
           // v1 の記事は baseP0ArticleTitles には積まない（無条件受理のため未検証）
           addSummaryWords(arts);
+          addProperTerms([v.title, ...arts.map((a) => a.title)]);
           isFirst = false;
           continue;
         }
@@ -299,6 +319,7 @@ export function splitForeignVersions(db, { p0Base } = {}) {
           baseVersionTitles.push(v.title);
           for (const a of arts) { baseArticleTitles.push(a.title); baseP0ArticleTitles.push(a.title); }
           addSummaryWords(arts);
+          addProperTerms([v.title, ...arts.map((a) => a.title)]);
           continue;
         }
         if (!arts.length) continue;
@@ -313,6 +334,7 @@ export function splitForeignVersions(db, { p0Base } = {}) {
           // 個別にアンカーを通過した記事は P0 の足場にも加える
           for (const a of anchoredArts) { baseArticleTitles.push(a.title); baseP0ArticleTitles.push(a.title); }
           addSummaryWords(anchoredArts);
+          addProperTerms(anchoredArts.map((a) => a.title));
           continue;
         }
         const stamps = arts.map((a) => a.published_at || a.fetched_at).filter(Boolean).sort();
