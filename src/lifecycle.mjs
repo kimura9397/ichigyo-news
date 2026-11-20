@@ -9,7 +9,7 @@
 //   purgeBodyData で消去する（サーバー起動時と refresh のライフサイクルで実行、冪等）。
 import { editorialRelated } from './editorials.mjs';
 import { importanceFor, refineCategory } from './classify.mjs';
-import { bigrams, filterWeakBigrams, matchScore, jaccard, strongTerms, summaryWords, stripBoilerplate, hasStoryAnchor, isNumericOnlyRevision, properTerms, sharedCount } from './matching.mjs';
+import { bigrams, filterWeakBigrams, matchScore, jaccard, strongTerms, summaryWords, stripBoilerplate, hasStoryAnchor, isNumericOnlyRevision, properTerms, sharedCount, hasDateConflict } from './matching.mjs';
 import { normalizeForSearch, buildArticleSearchText } from './normalize.mjs';
 
 export const RETENTION_DAYS = 7;
@@ -285,6 +285,10 @@ export function splitForeignVersions(db, { p0Base, summaryValve = 'proper' } = {
       const baseProperTerms = new Set(properTerms(stripBoilerplate(c.title)));
       const addProperTerms = (titles) => { for (const t of titles) for (const w of properTerms(stripBoilerplate(t))) baseProperTerms.add(w); };
       const articleAnchored = (a, titleOnly = false) => {
+        // 日替わり定型の例外（方向6）: 日付が食い違う記事は要約バルブでも救わない。
+        // ベースはクラスタ標題と基準版の標題に限る（記事の標題までは見ない:
+        // 基準側が別日分で汚染されている場合に正当な記事まで落とさないため）
+        if (hasDateConflict(a.title, [c.title, ...baseVersionTitles])) return false;
         if (hasStoryAnchor(a.title, c.title, baseVersionTitles, baseArticleTitles, { strict: true, p0Base, p0ArticleTitles: baseP0ArticleTitles })) return true;
         if (titleOnly) return false;
         let n = 0;

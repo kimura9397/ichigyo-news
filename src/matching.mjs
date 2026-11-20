@@ -261,6 +261,9 @@ const titleBases = [...new Set([clusterTitle, ...versionTitles].filter(Boolean))
 const titleBaseSet = new Set(titleBases);
 const baseAll = [...new Set([...titleBases, ...articleTitles.filter(Boolean)])];
 if (!candUnits.length || !baseAll.length) return false;
+// 日替わり定型の例外（方向6）: 標題・版タイトルと日付が食い違う候補は、
+// 文面がどれだけ似ていても同じ話のアンカーを持たない
+if (hasDateConflict(newTitle, titleBases)) return false;
 const nb = filterWeakBigrams(bigrams(newTitle));
 const p0Targets = p0Base === 'titles' ? titleBases
 : p0Base === 'articles-vetted' ? [...new Set([...titleBases, ...(p0ArticleTitles ?? articleTitles).filter(Boolean)])]
@@ -455,6 +458,34 @@ export function summaryValvePasses(properShared, strongShared, mode = 'or') {
 if (mode === 'proper') return properShared >= 1;
 if (mode === 'and') return properShared >= 1 && strongShared >= 2;
 return properShared >= 1 || strongShared >= 2;
+}
+
+/** 見出し中の「N月N日」表記の集合（'月/日' の数値ペア）。全角数字は半角に寄せる。 */
+export function titleDates(title) {
+const t = String(title || '').replace(/[０-９]/g, (c) => String.fromCharCode(c.charCodeAt(0) - 0xfee0));
+const out = new Set();
+for (const m of t.matchAll(/([0-9]{1,2})月([0-9]{1,2})日/g)) out.add(`${Number(m[1])}/${Number(m[2])}`);
+return out;
+}
+
+/**
+* 日付の食い違いが「同じ話ではない」ことの否定証拠になるか（監査の方向6、Issue #59）。
+* 候補とベース群の両方に「N月N日」があり、共通する日付が1つもない場合に限る。
+* 日付そのものは normalizeForMatch で落とす（続報の言い換えで日付表記が変わっても
+* 追えるようにするための既存仕様）が、その副作用で日替わり定型（首相動静・
+* 日次コーナー等）の別日分が「日付以外は同一文面」で一致してしまう。全面廃止は
+* せず、「両方に日付があり、かつ食い違う」場合だけを否定証拠として拾う。
+* 日付のない見出し、同じ日付を含む見出しには影響しない。「18日」のような
+* 月のない表記や「11月13日～15日」の範囲表記の終端は拾えない（既知の限界）。
+*/
+export function hasDateConflict(candidateTitle, baseTitles) {
+const cd = titleDates(candidateTitle);
+if (!cd.size) return false;
+const bd = new Set();
+for (const t of baseTitles) for (const d of titleDates(t)) bd.add(d);
+if (!bd.size) return false;
+for (const d of cd) if (bd.has(d)) return false;
+return true;
 }
 
 export const CLUSTER_THRESHOLD = 0.20;

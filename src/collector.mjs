@@ -8,7 +8,7 @@ import { runLifecycle } from './lifecycle.mjs';
 import { normalizeForSearch, buildArticleSearchText } from './normalize.mjs';
 import { listKeywords } from './keywords.mjs';
 import { FEEDS, isWrapperUrl, normalizeSource, extractSourceFromTitle, cleanTitle, fetchFeed, feedFailureMessage } from './rss.mjs';
-import { bigrams, jaccard, matchScore, filterWeakBigrams, summaryWords, sharedCount, strongTerms, properTerms, stripBoilerplate, hasStoryAnchor, isNumericOnlyRevision, isNewFactFollowUp, summaryValvePasses, CLUSTER_THRESHOLD, CLUSTER_WINDOW_MS } from './matching.mjs';
+import { bigrams, jaccard, matchScore, filterWeakBigrams, summaryWords, sharedCount, strongTerms, properTerms, stripBoilerplate, hasStoryAnchor, isNumericOnlyRevision, isNewFactFollowUp, summaryValvePasses, hasDateConflict, CLUSTER_THRESHOLD, CLUSTER_WINDOW_MS } from './matching.mjs';
 import { refineCategory, importanceFor } from './classify.mjs';
 
 // ---------- DB取り込み ----------
@@ -106,6 +106,9 @@ for (const [cid, entry] of clusterCache) {
   // 複数と強く一致する場合（裏付けがある場合）に限って同一視する。「いずれか1記事との
   // 最大類似」だけで判定すると、大きなクラスタほど1件の偶然の類似で別ニュースを吸い込み、
   // 吸い込んだ記事が次の吸収の足がかりになる（連鎖的過剰統合）。
+  // 日替わり定型の例外（方向6、Issue #59）: クラスタ標題と日付が食い違う候補は
+  // このクラスタの対象にしない（タイトル経路・要約バルブの全経路で）
+  if (hasDateConflict(title, [entry.title])) continue;
   const simTitle = matchScore(titleBg, entry.titleBg);
   let bestArticleSim = 0;
   let articleHits = 0;
@@ -161,6 +164,8 @@ joinedCluster = true;
 let target = null;
 let bestScore = 0;
 for (const v of vRows) {
+// 日付が食い違う版は捨て込み先にしない（方向6）
+if (hasDateConflict(title, [v.title])) continue;
 const s = matchScore(titleBg, filterWeakBigrams(bigrams(v.title)));
 if (s > bestScore) { bestScore = s; target = v; }
 }
