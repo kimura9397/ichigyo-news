@@ -439,6 +439,24 @@ for (const x of a) if (b.has(x)) n++;
 return n;
 }
 
+/**
+* 要約バルブの固有名詞条件（監査の方向5、Issue #59）。
+* 要約の語彙共有は通信社の定型要約で容易に届くため、タイトル同士の語彙共有を
+* 追加の錨にする。その条件の形を選ぶ:
+* - 'or'（従来）: 固有名詞っぽい語の共有1以上 か 強い語の共有2以上
+* - 'proper': 固有名詞っぽい語の共有1以上を必須とし、強い語だけでは通さない
+* - 'and': 固有名詞っぽい語1以上 かつ 強い語2以上の両方を必須にする
+* 注意: properTerms はカタカナ・英字の語だけを拾うため、漢字の固有名詞
+* （地名・人名・組織名）だけの見出しでは 'proper' / 'and' は構造的に通らない。
+* 正当な続報の連鎖が漢字見出しで届くケース（枚方の実例）があるため、
+* どの経路にどのモードを使うかは呼び出し側が決める。
+*/
+export function summaryValvePasses(properShared, strongShared, mode = 'or') {
+if (mode === 'proper') return properShared >= 1;
+if (mode === 'and') return properShared >= 1 && strongShared >= 2;
+return properShared >= 1 || strongShared >= 2;
+}
+
 export const CLUSTER_THRESHOLD = 0.20;
 export const CLUSTER_WINDOW_MS = 3 * 24 * 3600000; // 照合対象は直近3日のクラスタに限る
 

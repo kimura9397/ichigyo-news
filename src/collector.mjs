@@ -8,7 +8,7 @@ import { runLifecycle } from './lifecycle.mjs';
 import { normalizeForSearch, buildArticleSearchText } from './normalize.mjs';
 import { listKeywords } from './keywords.mjs';
 import { FEEDS, isWrapperUrl, normalizeSource, extractSourceFromTitle, cleanTitle, fetchFeed, feedFailureMessage } from './rss.mjs';
-import { bigrams, jaccard, matchScore, filterWeakBigrams, summaryWords, sharedCount, strongTerms, properTerms, stripBoilerplate, hasStoryAnchor, isNumericOnlyRevision, isNewFactFollowUp, CLUSTER_THRESHOLD, CLUSTER_WINDOW_MS } from './matching.mjs';
+import { bigrams, jaccard, matchScore, filterWeakBigrams, summaryWords, sharedCount, strongTerms, properTerms, stripBoilerplate, hasStoryAnchor, isNumericOnlyRevision, isNewFactFollowUp, summaryValvePasses, CLUSTER_THRESHOLD, CLUSTER_WINDOW_MS } from './matching.mjs';
 import { refineCategory, importanceFor } from './classify.mjs';
 
 // ---------- DB取り込み ----------
@@ -47,16 +47,16 @@ export function isGarbageItem(item, now = new Date()) {
 * 記事配列をDBに取り込む。fetchに依存しない純粋な取り込み処理（テスト可能）。
 * 戻り値: { seen, inserted}
 */
-export function ingestArticles(db, rawItems, now = new Date()) {
+export function ingestArticles(db, rawItems, now = new Date(), { summaryValve = 'or' } = {}) {
 db.exec('BEGIN IMMEDIATE');
 try {
-const result = ingestInner(db, rawItems, now);
+const result = ingestInner(db, rawItems, now, summaryValve);
 db.exec('COMMIT');
 return result;
 } catch (e) { try { db.exec('ROLLBACK'); } catch {} throw e; }
 }
 
-function ingestInner(db, rawItems, now = new Date()) {
+function ingestInner(db, rawItems, now = new Date(), summaryValve = 'or') {
 const nowIso = now.toISOString();
 const items = [...rawItems].sort((a, b) => String(a.publishedAt || '').localeCompare(String(b.publishedAt || '')));
 let inserted = 0;
@@ -118,13 +118,17 @@ for (const [cid, entry] of clusterCache) {
   if (simTitle >= CLUSTER_THRESHOLD) maxSim = Math.max(simTitle, bestArticleSim);
   else if (bestArticleSim >= 0.5 && articleHits >= 2) maxSim = bestArticleSim;
   if (maxSim === 0) {
-    // 補助経路: 見出しの弱い類似＋概要の特徴語共有。テーマだけ似た別ニュース（例: 別の会社の
-    // 情報漏えい）を拾わないよう、閾値を引き上げ、固有名詞っぽい強い語の共有を必須にする。
+    // 補助経路（要約バルブ）: 見出しの弱い類似＋概要の特徴語共有。テーマだけ似た別ニュース
+    // （例: 別の会社の情報漏えい）を拾わないよう、閾値を引き上げ、固有名詞っぽい強い語の
+    // 共有を必須にする。固有名詞条件の形は summaryValve で選ぶ（監査の方向5、Issue #59）。
+    // 取り込み側の既定は従来の 'or': properTerms はカタカナ・英字だけを拾うため、
+    // 'proper' / 'and' にすると漢字の固有名詞だけの正当な続報（枚方の実例）が
+    // 構造的に通らなくなる。締めるのは修復側（lifecycle）とする。
     let graded = jaccard(titleBg, entry.titleBg);
     for (const bg of entry.articleBgs) graded = Math.max(graded, jaccard(titleBg, bg));
     const strongShared = sharedCount(itemStrong, entry.allStrong);
     const properShared = sharedCount(itemProper, entry.allProper);
-    if (graded >= 0.2 && sharedCount(itemSummaryWords, entry.summaryWords) >= 4 && (properShared >= 1 || strongShared >= 2)) {
+    if (graded >= 0.2 && sharedCount(itemSummaryWords, entry.summaryWords) >= 4 && summaryValvePasses(properShared, strongShared, summaryValve)) {
       maxSim = CLUSTER_THRESHOLD;
     }
   }
