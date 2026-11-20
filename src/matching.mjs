@@ -225,20 +225,51 @@ return n;
 *   記事タイトルに対しては 0.35 以上とし、短いベースへの免除はしない。記事タイトル
 *   への P0 自体は残す: 見出しが大きく乖離した正当な続報は、受理済み版の記事とだけ
 *   似る形で連鎖することがあり（枚方の実例）、ここを消すと正当な版の連鎖が割れる。
-*   修復のベースに積まれる記事は受理済み版のものだけなので、連鎖の足場は限られる
+*   ただし足場にできるのは受理済み版の記事だけ（p0Base の 'articles-vetted'。
+*   無条件に受理される v1 の記事は足場にしない）
 * - P0s（短いベース見出し向けの救済）は使わない
 * - P7 のベース側包含率を 0.25 → 0.40 に上げる
 * 裏付けを使う経路（P1〜P6）はそのまま残す。固有名詞＋役職名の共有だけで通る
 * 別ニュース（企業名＋CEO 等）はこの物差しでも残る既知の限界（監査の理由5）。
+*
+* p0Base は P0／P0s のベースに記事タイトルをどこまで使うかの実験オプション
+* （監査の方向4、Issue #56）。記事タイトルは裏付け（支持）のプールとしては
+* 全モードで従来どおり使う。モードは次の5つ:
+* - 'all'（従来）: 記事タイトルも標題・版タイトルと同じ条件で P0 のベースにする
+* - 'titles'（方向4の全面縮小）: P0／P0s のベースを標題＋版タイトルに限定し、
+*   語彙ベース（P3／P4 の anyBase）からも記事タイトルを外す
+* - 'articles-high'（条件付き）: 記事タイトルへの P0 は候補側包含率 0.45 以上を
+*   要求し、短いベースへの免除と P0s を記事タイトルには適用しない
+* - 'articles-multi'（条件付き）: 記事タイトルへの P0 は、基準（包含率が
+*   取り込み 0.3／修復 0.35 以上）を満たす記事タイトルが2件以上ある場合にだけ通す
+* - 'articles-vetted'（条件付き・既定）: P0 のベースにする記事タイトルを、呼び出し
+*   側が p0ArticleTitles で渡した「アンカーを通過して受理された版に属する記事」に
+*   限る。閾値は 'all' と同じ。v1 は無条件に受理されるため、その記事（取り込み時に
+*   既存版へ無条件に近い形で溜まった記事を含む）は P0 の足場にしない。裏付け
+*   プール（articleTitles）と語彙ベースには従来どおり全記事を使う。
+*   p0ArticleTitles を渡さない呼び出しでは articleTitles がそのまま足場になる
+*
+* 既定を 'articles-vetted' とする理由（Issue #56 の検証）: 全面縮小（'titles'）は
+* 修復の分割を最も増やすが、枚方の連鎖（受理済み版の記事だけを足場に続報が
+* つながる形）を割る。'articles-vetted' は v1 の未検証の記事だけを足場から外す
+* ことで、連鎖を保ったまま実データ修復の分割増（75→89件）と誤合体クラスタの
+* 残存版数の削減（6→4版）を両立できた。
 */
-export function hasStoryAnchor(newTitle, clusterTitle, versionTitles = [], articleTitles = [], { strict = false } = {}) {
+export function hasStoryAnchor(newTitle, clusterTitle, versionTitles = [], articleTitles = [], { strict = false, p0Base = 'articles-vetted', p0ArticleTitles = null } = {}) {
 const candUnits = anchorUnits(newTitle);
-const baseAll = [...new Set([clusterTitle, ...versionTitles, ...articleTitles].filter(Boolean))];
+const titleBases = [...new Set([clusterTitle, ...versionTitles].filter(Boolean))];
+const titleBaseSet = new Set(titleBases);
+const baseAll = [...new Set([...titleBases, ...articleTitles.filter(Boolean)])];
 if (!candUnits.length || !baseAll.length) return false;
 const nb = filterWeakBigrams(bigrams(newTitle));
-for (const t of baseAll) {
+const p0Targets = p0Base === 'titles' ? titleBases
+: p0Base === 'articles-vetted' ? [...new Set([...titleBases, ...(p0ArticleTitles ?? articleTitles).filter(Boolean)])]
+: baseAll;
+let articleP0Hits = 0; // 'articles-multi' 用: 基準を満たした記事タイトル数
+for (const t of p0Targets) {
+const isTitleBase = titleBaseSet.has(t);
 const tb = filterWeakBigrams(bigrams(t));
-if (!strict && tb.size > 0 && tb.size <= 8) {
+if (!strict && (p0Base === 'all' || p0Base === 'articles-vetted' || isTitleBase) && tb.size > 0 && tb.size <= 8) {
 let inter = 0;
 for (const x of nb) if (tb.has(x)) inter++;
 if (inter >= 3 && inter / tb.size >= 0.5) return true; // P0s
@@ -247,12 +278,22 @@ if (matchScore(nb, tb) > 0) {
 let inter = 0;
 for (const x of nb) if (tb.has(x)) inter++;
 if (!nb.size) continue;
+const containment = inter / nb.size;
+if (!isTitleBase && p0Base !== 'all' && p0Base !== 'articles-vetted') {
+// 記事タイトルに対する P0 の条件付き扱い（'titles' では対象自体がない）
+if (p0Base === 'articles-high') {
+if (containment >= 0.45) return true; // P0（記事タイトル・高包含率）
+} else if (p0Base === 'articles-multi') {
+if (containment >= (strict ? 0.35 : 0.3)) articleP0Hits++;
+}
+continue;
+}
 if (strict) {
-const isTitleBase = t === clusterTitle || versionTitles.includes(t);
-if (inter / nb.size >= (isTitleBase ? 0.45 : 0.35)) return true; // P0 (strict)
-} else if (inter / nb.size >= 0.3 || tb.size <= 8) return true; // P0
+if (containment >= (isTitleBase ? 0.45 : 0.35)) return true; // P0 (strict)
+} else if (containment >= 0.3 || tb.size <= 8) return true; // P0
 }
 }
+if (p0Base === 'articles-multi' && articleP0Hits >= 2) return true; // P0（記事タイトル・複数一致）
 const titleUnits = anchorUnits(clusterTitle);
 { // P6 / P7: クラスタタイトルとの完全一致ユニット
 const titleTexts = new Set(titleUnits.map((v) => v.text));
@@ -270,7 +311,8 @@ const coreUnits = [...titleUnits, ...anchorUnits(versionTitles[0] || '')];
 const supportTitles = [...articleTitles];
 if (clusterTitle && !articleTitles.includes(clusterTitle)) supportTitles.push(clusterTitle);
 const supportUnitsList = supportTitles.map((t) => anchorUnits(t));
-const baseUnitsList = baseAll.map((t) => anchorUnits(t));
+// 'titles' モードでは語彙ベースからも記事タイトルを外す（裏付けプールとは別）
+const baseUnitsList = (p0Base === 'titles' ? titleBases : baseAll).map((t) => anchorUnits(t));
 let strongBacked = 0;
 let strongTitleShared = 0;
 let topicTitleShared = 0;
@@ -357,7 +399,7 @@ return false;
 export function isNewFactFollowUp(existingTitles, newTitle, anchor = null) {
 const nb = bigrams(newTitle);
 if (!nb.size) return false;
-if (anchor && !hasStoryAnchor(newTitle, anchor.clusterTitle || '', existingTitles, anchor.articleTitles || [])) return false;
+if (anchor && !hasStoryAnchor(newTitle, anchor.clusterTitle || '', existingTitles, anchor.articleTitles || [], { p0Base: anchor.p0Base, p0ArticleTitles: anchor.p0ArticleTitles })) return false;
 const allExisting = new Set();
 for (const t of existingTitles) for (const b of bigrams(t)) allExisting.add(b);
 const newFacts = new Set([...factTokens(newTitle)].filter((t) => ![...existingTitles].some((et) => factTokens(et).has(t))));

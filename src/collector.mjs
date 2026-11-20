@@ -83,7 +83,7 @@ for (const a of db.prepare('SELECT cluster_id, title, summary FROM articles').al
   for (const w of strongTerms(stripBoilerplate(a.title))) entry.allStrong.add(w);
   for (const w of properTerms(stripBoilerplate(a.title))) entry.allProper.add(w);
 }
-const articleTitlesStmt = db.prepare('SELECT title FROM articles WHERE cluster_id = ?');
+const articleTitlesStmt = db.prepare('SELECT title, version_id FROM articles WHERE cluster_id = ?');
 for (const raw of items) {
 if (!raw.url || !raw.title) continue;
 if (isGarbageItem(raw, now)) continue;
@@ -137,8 +137,12 @@ const vRows = db.prepare('SELECT id, version_no, title FROM versions WHERE clust
 const vTitles = vRows.map((r) => r.title);
 const latest = vRows[vRows.length - 1];
 const clusterTitle = clusterCache.get(best.id)?.title || '';
-const articleTitles = articleTitlesStmt.all(best.id).map((r) => r.title);
-if (isNewFactFollowUp(vTitles, title, { clusterTitle, articleTitles })) {
+const articleRows = articleTitlesStmt.all(best.id);
+const articleTitles = articleRows.map((r) => r.title);
+// P0 の足場にできる記事（'articles-vetted' 用、Issue #56）: v1 は無条件に作られる
+// 版なので、その記事は足場にせず、v2 以降（アンカーを通過して作られた版）の記事だけを渡す
+const p0ArticleTitles = articleRows.filter((r) => r.version_id !== vRows[0].id).map((r) => r.title);
+if (isNewFactFollowUp(vTitles, title, { clusterTitle, articleTitles, p0ArticleTitles })) {
 const info = db.prepare('INSERT INTO versions (cluster_id, version_no, title, created_at) VALUES (?, ?, ?, ?)').run(best.id, latest.version_no + 1, title, nowIso);
 clusterId = best.id;
 versionId = Number(info.lastInsertRowid);
@@ -161,7 +165,7 @@ if (s > bestScore) { bestScore = s; target = v; }
 // 判定は最新版の見出しに対して行い、錨が無い記事（別ニュースの紛れ込み）は
 // 代表見出しを書き換えない。改訂は定義上、最新版と数値以外の文面をほぼ共有
 // するため、この経路も最新版との matchScore > 0 を条件にする。
-if (hasStoryAnchor(title, clusterTitle, vTitles, articleTitles) && isNumericOnlyRevision([latest.title], title)
+if (hasStoryAnchor(title, clusterTitle, vTitles, articleTitles, { p0ArticleTitles }) && isNumericOnlyRevision([latest.title], title)
 && matchScore(titleBg, filterWeakBigrams(bigrams(latest.title))) > 0) {
 target = latest;
 if (latest.title !== title) {
